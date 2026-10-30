@@ -45,7 +45,6 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSAllowsArbitraryLoadsForMedia: true
-        UILaunchScreen: {}
 schemes:
   CineVault:
     build:
