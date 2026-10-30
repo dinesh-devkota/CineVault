@@ -184,14 +184,18 @@ jobs:
           echo "device=$device" >> "$GITHUB_OUTPUT"
       - name: Build commercial simulator tests
         run: |
+          set -euo pipefail
+          info=CineVault/Info.plist
+          saved_info="$RUNNER_TEMP/cinevault-simulator-info.plist"
+          cp "$info" "$saved_info"
+          trap 'cp "$saved_info" "$info"; rm -f "$saved_info"' EXIT
+          plutil -remove UIRequiredDeviceCapabilities "$info"
           bash scripts/run_commercial_stage.sh "Simulator test build" \
             "$RUNNER_TEMP/cinevault-commercial.log" \
             xcodebuild -project CineVault.xcodeproj -scheme CineVault \
               -destination 'id=${{ steps.simulator.outputs.device }}' -configuration Debug \
               -derivedDataPath "$RUNNER_TEMP/cinevault-commercial-tests" \
-              CODE_SIGNING_ALLOWED=NO build-for-testing
-          plutil -remove UIRequiredDeviceCapabilities \
-            "$RUNNER_TEMP/cinevault-commercial-tests/Build/Products/Debug-appletvsimulator/CineVault.app/Info.plist"
+              CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES build-for-testing
       - name: Run commercial simulator tests
         run: |
           set -euo pipefail
@@ -204,7 +208,7 @@ jobs:
               -destination "id=$device" -configuration Debug \
               -derivedDataPath "$RUNNER_TEMP/cinevault-commercial-tests" \
               -parallel-testing-enabled NO -only-testing:CommercialIntegrationTests \
-              CODE_SIGNING_ALLOWED=NO test-without-building
+              CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES test-without-building
       - name: Regenerate the release project for TestFlight
         if: inputs.upload_testflight
         run: |

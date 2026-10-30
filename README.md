@@ -80,6 +80,8 @@ Everything builds on GitHub's macOS runners:
 2. Licensed developers can manually run **Commercial build** in their public repository.
    It fetches an explicitly pinned private package, tests it, builds the tvOS app, and can
    optionally sign and upload it to TestFlight. No workflow runs in the private repository.
+   Simulator tests use temporary ad-hoc signing for Keychain access; they do not need Apple
+   signing credentials.
 
 For a visual check without a Mac, run **UI preview** from the Actions tab and download the
 `cinevault-ui-preview` artifact. It captures the home and movie detail screens using an
