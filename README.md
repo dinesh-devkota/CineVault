@@ -44,7 +44,8 @@ Everything builds on GitHub's macOS runners:
 For a visual check without a Mac, run **UI preview** from the Actions tab and download the
 `cinevault-ui-preview` artifact. It captures the home and movie detail screens using an
 in-memory sample library with placeholder artwork; it never connects to a NAS or changes
-your real collection.
+your real collection. The workflow checks for screen-specific text before accepting each
+capture, and uploads diagnostic screenshots if a preview fails.
 
 On a Mac you can also do it locally: `brew install xcodegen && python3 scripts/generate_app_icons.py && xcodegen generate && open CineVault.xcodeproj`.
 

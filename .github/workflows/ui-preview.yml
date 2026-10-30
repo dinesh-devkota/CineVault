@@ -47,6 +47,24 @@ jobs:
           set -euo pipefail
           DEVICE='${{ steps.simulator.outputs.device }}'
           APP="$RUNNER_TEMP/cinevault-derived/Build/Products/Debug-appletvsimulator/CineVault.app"
+          swiftc scripts/verify_preview.swift -o "$RUNNER_TEMP/verify-preview"
+          capture_when_ready() {
+            local path="$1"
+            local expected="$2"
+            for attempt in {1..24}; do
+              if ! kill -0 "$PID" 2>/dev/null; then
+                echo "CineVault exited before $expected became visible." >&2
+                return 1
+              fi
+              if xcrun simctl io "$DEVICE" screenshot "$path" >/dev/null 2>&1 &&
+                 "$RUNNER_TEMP/verify-preview" "$path" "$expected"; then
+                return 0
+              fi
+              sleep 5
+            done
+            echo "Timed out waiting for $expected in the screenshot." >&2
+            return 1
+          }
           # The physical-device arm64 requirement does not apply to the simulator.
           plutil -remove UIRequiredDeviceCapabilities "$APP/Info.plist"
           xcrun simctl boot "$DEVICE"
@@ -55,22 +73,12 @@ jobs:
           LAUNCH=$(xcrun simctl launch "$DEVICE" com.dineshdevkota.cinevault --ui-preview)
           echo "$LAUNCH"
           PID="${LAUNCH##*: }"
-          sleep 12
-          if ! kill -0 "$PID" 2>/dev/null; then
-            echo "CineVault exited before the screenshot was captured." >&2
-            exit 1
-          fi
-          xcrun simctl io "$DEVICE" screenshot "$RUNNER_TEMP/cinevault-home.png"
+          capture_when_ready "$RUNNER_TEMP/cinevault-home.png" "Continue Watching"
           xcrun simctl terminate "$DEVICE" com.dineshdevkota.cinevault
           LAUNCH=$(xcrun simctl launch "$DEVICE" com.dineshdevkota.cinevault --ui-preview-detail)
           echo "$LAUNCH"
           PID="${LAUNCH##*: }"
-          sleep 12
-          if ! kill -0 "$PID" 2>/dev/null; then
-            echo "CineVault exited before the detail screenshot was captured." >&2
-            exit 1
-          fi
-          xcrun simctl io "$DEVICE" screenshot "$RUNNER_TEMP/cinevault-detail.png"
+          capture_when_ready "$RUNNER_TEMP/cinevault-detail.png" "Start Over"
       - uses: actions/upload-artifact@v4
         with:
           name: cinevault-ui-preview
@@ -78,4 +86,12 @@ jobs:
             ${{ runner.temp }}/cinevault-home.png
             ${{ runner.temp }}/cinevault-detail.png
           if-no-files-found: error
+          retention-days: 7
+      - name: Upload screenshots for failed previews
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinevault-preview-diagnostics
+          path: ${{ runner.temp }}/cinevault-*.png
+          if-no-files-found: warn
           retention-days: 7
