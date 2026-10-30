@@ -11,8 +11,8 @@ targets:
     settings:
       base:
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CINEVAULT_COMMERCIAL"
-        CINEVAULT_MONTHLY_PRODUCT_ID: com.dineshdevkota.cinevault.monthly
-        CINEVAULT_LIFETIME_PRODUCT_ID: com.dineshdevkota.cinevault.lifetime
+        CINEVAULT_MONTHLY_PRODUCT_ID: "$(PRODUCT_BUNDLE_IDENTIFIER).monthly"
+        CINEVAULT_LIFETIME_PRODUCT_ID: "$(PRODUCT_BUNDLE_IDENTIFIER).lifetime"
     info:
       properties:
         CineVaultMonthlyProductID: $(CINEVAULT_MONTHLY_PRODUCT_ID)
