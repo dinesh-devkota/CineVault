@@ -218,8 +218,8 @@ Tip: naming folders `Title (Year)/Title (Year).mp4` gives the best matches; add 
 cd Packages/CineVaultCore && swift test
 ```
 
-The public CI also runs `python3 -m unittest discover -s scripts/tests -p test_commercial_stage.py`
-to check that commercial command output stays out of public logs.
+The public CI also runs `python3 -m unittest discover -s scripts/tests -p 'test_commercial_*.py'`
+to check commercial build helpers and keep private command output out of public logs.
 
 The **NAS integration** workflow also checks authenticated SMB scanning, byte-range
 reads, and AVPlayer playback and seeking on an Apple TV simulator. It creates a temporary

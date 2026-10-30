@@ -141,9 +141,17 @@ jobs:
             "$RUNNER_TEMP/cinevault-commercial.log" \
             xcodebuild -project CineVault.xcodeproj -scheme CineVault \
               -destination 'generic/platform=tvOS' -configuration Release \
+              -derivedDataPath "$RUNNER_TEMP/cinevault-commercial-release" \
               CODE_SIGNING_ALLOWED=NO "PRODUCT_BUNDLE_IDENTIFIER=$APP_BUNDLE_ID" \
               "CINEVAULT_MONTHLY_PRODUCT_ID=$CINEVAULT_MONTHLY_PRODUCT_ID" \
               "CINEVAULT_LIFETIME_PRODUCT_ID=$CINEVAULT_LIFETIME_PRODUCT_ID" build
+      - name: Verify the built purchase identifiers
+        run: |
+          bash scripts/run_commercial_stage.sh "Purchase identifier verification" \
+            "$RUNNER_TEMP/cinevault-commercial.log" \
+            python3 scripts/check_commercial_products.py \
+              "$RUNNER_TEMP/cinevault-commercial-release/Build/Products/Release-appletvos/CineVault.app/Info.plist" \
+              "$APP_BUNDLE_ID" "$CINEVAULT_MONTHLY_PRODUCT_ID" "$CINEVAULT_LIFETIME_PRODUCT_ID"
       - name: Prepare commercial simulator tests
         run: |
           bash scripts/run_commercial_stage.sh "Simulator test dependencies" \
