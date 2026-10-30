@@ -1,5 +1,8 @@
 import SwiftData
 import SwiftUI
+#if CINEVAULT_COMMERCIAL
+import CineVaultCommercial
+#endif
 
 struct SourcesView: View {
     @Environment(\.modelContext) private var context
@@ -150,11 +153,19 @@ struct SourceEditorView: View {
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var playbackServices: PlaybackServices
     @State private var apiKey = ""
     @State private var message: String?
 
     var body: some View {
         Form {
+            #if CINEVAULT_COMMERCIAL
+            Section("Playback") {
+                NavigationLink("Playback & Purchases") {
+                    CommercialAccountView(services: playbackServices.commercial)
+                }
+            }
+            #endif
             Section {
                 SecureField("TMDB API key or read access token", text: $apiKey)
                 Button("Save Key & Fetch Missing Metadata") {

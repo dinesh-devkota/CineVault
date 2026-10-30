@@ -5,30 +5,36 @@ import SwiftUI
 @main
 struct CineVaultApp: App {
     @StateObject private var scanner = LibraryScanner()
+    @StateObject private var playbackServices = PlaybackServices()
 
     var body: some Scene {
         WindowGroup {
-            #if DEBUG
-            if DesignPreview.isEnabled {
-                DesignPreview()
-                    .environmentObject(scanner)
-            } else {
+            Group {
+                #if DEBUG
+                if DesignPreview.isEnabled {
+                    DesignPreview()
+                        .environmentObject(scanner)
+                } else {
+                    RootView()
+                        .environmentObject(scanner)
+                        .modelContainer(for: [MediaSource.self, Movie.self])
+                }
+                #else
                 RootView()
                     .environmentObject(scanner)
                     .modelContainer(for: [MediaSource.self, Movie.self])
+                #endif
             }
-            #else
-            RootView()
-                .environmentObject(scanner)
-                .modelContainer(for: [MediaSource.self, Movie.self])
-            #endif
+            .environmentObject(playbackServices)
         }
     }
 }
 
 struct RootView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var scanner: LibraryScanner
+    @EnvironmentObject private var playbackServices: PlaybackServices
 
     var body: some View {
         TabView {
@@ -40,6 +46,17 @@ struct RootView: View {
         }
         .tint(CinemaTheme.accent)
         .preferredColorScheme(.dark)
+        .task {
+            #if DEBUG
+            if DesignPreview.isEnabled { return }
+            #endif
+            await playbackServices.refresh()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await playbackServices.refresh() }
+            }
+        }
         .task {
             #if DEBUG
             if DesignPreview.isEnabled { return }

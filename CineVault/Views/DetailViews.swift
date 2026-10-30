@@ -1,12 +1,17 @@
 import CineVaultCore
 import SwiftData
 import SwiftUI
+#if CINEVAULT_COMMERCIAL
+import CineVaultCommercial
+#endif
 
 struct MovieDetailView: View {
     @Bindable var movie: Movie
+    @EnvironmentObject private var playbackServices: PlaybackServices
     @State private var playback: PlaybackController?
     @State private var editing = false
     @State private var unsupported = false
+    @State private var missingSource = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -53,6 +58,9 @@ struct MovieDetailView: View {
                             .frame(maxWidth: 820, alignment: .leading)
                     }
 
+                    #if CINEVAULT_COMMERCIAL
+                    CommercialPlaybackNotice(services: playbackServices.commercial)
+                    #endif
                     playbackControls
                         .padding(.top, 16)
                     fileDetails
@@ -66,7 +74,7 @@ struct MovieDetailView: View {
         }
         .sheet(isPresented: $editing) { NavigationStack { EditMovieView(movie: movie) } }
         .fullScreenCover(item: $playback) { controller in
-            PlayerView(controller: controller)
+            PlaybackScreen(controller: controller)
                 .ignoresSafeArea()
                 .onDisappear { controller.stop() }
         }
@@ -75,13 +83,18 @@ struct MovieDetailView: View {
         } message: {
             Text("Apple TV's built-in player can't play .\((movie.fileName as NSString).pathExtension) files. Remux it to MP4 (e.g. with ffmpeg -c copy) on your NAS and rescan.")
         }
+        .alert("Source unavailable", isPresented: $missingSource) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("This movie no longer has a NAS source. Add the source again and rescan before playing.")
+        }
     }
 
     private var playbackControls: some View {
         HStack(spacing: 24) {
-            if movie.isInProgress {
+            if playbackServices.canResume(movie) {
                 Button { play(resume: true) } label: {
-                    Label("Resume \(format(movie.playbackPosition))", systemImage: "play.fill")
+                    Label("Resume \(format(playbackServices.resumePosition(movie)))", systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.white)
@@ -152,7 +165,11 @@ struct MovieDetailView: View {
             unsupported = true
             return
         }
-        playback = PlaybackController(movie: movie, resume: resume)
+        guard let controller = PlaybackController(movie: movie, resume: resume, services: playbackServices) else {
+            missingSource = true
+            return
+        }
+        playback = controller
     }
 }
 

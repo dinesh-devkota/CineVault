@@ -42,17 +42,35 @@ Apple TV simulator previews with a sample library and placeholder artwork:
 | `.github/workflows/ci.yml` | Core tests + unsigned tvOS build on every push/PR |
 | `.github/workflows/nas-integration.yml` | Simulator tests against a temporary local SMB fixture |
 | `.github/workflows/ui-preview.yml` | On-demand Apple TV simulator screenshots with a sample library |
-| `.github/workflows/testflight.yml` | Signed build + TestFlight upload (manual or `v*` tag) |
-| `fastlane/Fastfile` | `beta` lane used by the TestFlight workflow |
+| `fastlane/Fastfile` | Generic signing helper for independently distributed public builds |
 
 Dependencies: [AMSMB2](https://github.com/amosavian/AMSMB2) (SMB client). It wraps libsmb2 (LGPL‑2.1); its SwiftPM product is a **dynamic** framework, so it ships as a separate, replaceable `AMSMB2.framework` inside the app, as LGPL requires.
+
+### Public and official builds
+
+The public app builds independently, without a private dependency or repository token.
+Official distribution adds a separate private `CineVaultCommercial` Swift package through
+the private release pipeline. Its implementation, purchase configuration, usage policies,
+tests, build logs, and release artifacts are not published here.
+
+The official app's [privacy policy](docs/PRIVACY.md) is publicly readable so users and
+App Review can access it without permission to the private repository.
+
+The private build spec must add the package dependency and define
+`CINEVAULT_COMMERCIAL` for the app. This flag intentionally requires the module at compile
+time: an official build cannot silently fall back to the public variant if the package
+is missing. Never add private source or credentials to public workflows or upload them
+as public artifacts. A private module protects its source; it does not prevent forks
+from modifying their independently distributed app.
 
 ## Building without a Mac
 
 Everything builds on GitHub's macOS runners:
 
 1. Push to `main` → **CI** runs `swift test` for the core package and an unsigned tvOS build.
-2. Run **TestFlight** (Actions → TestFlight → Run workflow, or push a tag like `v1.0.0`) → signed build is uploaded to App Store Connect.
+2. Official signed builds and TestFlight uploads run in the **private commercial repository**,
+   using an explicitly selected public app revision. The public TestFlight workflow has
+   been removed so a public-repository release cannot accidentally omit the private module.
 
 For a visual check without a Mac, run **UI preview** from the Actions tab and download the
 `cinevault-ui-preview` artifact. It captures the home and movie detail screens using an
@@ -66,7 +84,7 @@ On a Mac you can also do it locally: `brew install xcodegen && python3 scripts/g
 
 You need a paid Apple Developer account.
 
-1. **Bundle ID** — developer.apple.com → Certificates, IDs & Profiles → Identifiers → **+** → App IDs → App, bundle ID `com.dineshdevkota.cinevault` (or your own; then set repo **variable** `APP_BUNDLE_ID`).
+1. **Bundle ID** — developer.apple.com → Certificates, IDs & Profiles → Identifiers → **+** → App IDs → App, bundle ID `com.dineshdevkota.cinevault` (or your own; then set private commercial repo **variable** `APP_BUNDLE_ID`).
 2. **App record** — appstoreconnect.apple.com → Apps → **+** → New App, platform **tvOS**, same bundle ID.
 3. **App Store Connect API key** — App Store Connect → Users and Access → Integrations → App Store Connect API → generate a key with **App Manager** role. Note the *Key ID* and *Issuer ID*, download the `.p8`.
 4. **Distribution certificate** — run these OpenSSL commands (e.g. in Git Bash) from a private folder **outside the repository**. Keep the `.key`, `.p12`, `.p8`, and password private:
@@ -80,7 +98,8 @@ You need a paid Apple Developer account.
    openssl pkcs12 -export -legacy -inkey dist.key -in dist.pem -out dist.p12 -passout pass:CHOOSE_A_PASSWORD
    ```
    (Drop `-legacy` if your OpenSSL is older than 3.0.)
-5. **Repository secrets** (GitHub → Settings → Secrets and variables → Actions):
+5. **Private commercial repository secrets** (GitHub → Settings → Secrets and variables → Actions).
+   Do not add these to this public repository:
 
    | Secret | Value |
    |---|---|
@@ -93,11 +112,13 @@ You need a paid Apple Developer account.
 
    Base64 on Windows PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("dist.p12")) | Set-Clipboard`.
 
-The provisioning profile is created/reused automatically by fastlane through the API key. Build numbers come from the workflow run number.
+The private release pipeline handles the provisioning profile and build number.
+Configure its optional `APP_BUNDLE_ID` variable if using a custom identifier.
+Purchase-product setup is documented in that repository rather than in the public app.
 
 ## Installing on Apple TV (TestFlight)
 
-1. After the TestFlight workflow succeeds, wait for processing in App Store Connect (≈10–30 min).
+1. After the private TestFlight workflow succeeds, wait for processing in App Store Connect (≈10–30 min).
 2. App Store Connect → your app → **TestFlight** → add yourself as an internal tester.
 3. On the Apple TV install **TestFlight** from the App Store, sign in with the same Apple ID, install **CineVault**. Internal builds expire after 90 days — just re-run the workflow.
 

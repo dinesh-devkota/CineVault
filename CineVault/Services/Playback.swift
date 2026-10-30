@@ -2,6 +2,9 @@ import AVFoundation
 import AVKit
 import CineVaultCore
 import SwiftUI
+#if CINEVAULT_COMMERCIAL
+import CineVaultCommercial
+#endif
 
 /// Streams a NAS file into AVPlayer by answering byte-range requests with SMB reads,
 /// so playback starts immediately and seeking works without downloading the file.
@@ -81,21 +84,32 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
 @MainActor
 final class PlaybackController: ObservableObject {
     let player: AVPlayer
+    #if CINEVAULT_COMMERCIAL
+    let commercialSession: CommercialPlaybackSession
+    #endif
     private let loader: SMBResourceLoader
     private let movie: Movie
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
 
-    init?(movie: Movie, resume: Bool) {
+    init?(movie: Movie, resume: Bool, services: PlaybackServices) {
         guard let source = movie.source else { return nil }
         self.movie = movie
         loader = SMBResourceLoader(config: source.config, path: movie.filePath, knownSize: movie.fileSize)
         let item = AVPlayerItem(asset: loader.makeAsset())
         item.externalMetadata = Self.metadata(for: movie)
-        player = AVPlayer(playerItem: item)
+        let player = AVPlayer(playerItem: item)
+        self.player = player
+        #if CINEVAULT_COMMERCIAL
+        commercialSession = services.commercial.makePlaybackSession(
+            player: player, mediaID: movie.id.uuidString, resume: resume,
+            initialPosition: resume ? services.resumePosition(movie) : 0
+        )
+        #else
         if resume, movie.playbackPosition > 0 {
             player.seek(to: CMTime(seconds: movie.playbackPosition, preferredTimescale: 600))
         }
+        #endif
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 10, preferredTimescale: 1), queue: .main) { [weak self] time in
             MainActor.assumeIsolated { self?.record(time: time.seconds) }
         }
@@ -136,6 +150,9 @@ final class PlaybackController: ObservableObject {
     }
 
     func stop() {
+        #if CINEVAULT_COMMERCIAL
+        commercialSession.stop()
+        #endif
         record(time: player.currentTime().seconds)
         player.pause()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
@@ -143,6 +160,18 @@ final class PlaybackController: ObservableObject {
         timeObserver = nil
         endObserver = nil
         try? movie.modelContext?.save()
+    }
+}
+
+struct PlaybackScreen: View {
+    let controller: PlaybackController
+
+    var body: some View {
+        #if CINEVAULT_COMMERCIAL
+        CommercialPlayerView(session: controller.commercialSession)
+        #else
+        PlayerView(controller: controller)
+        #endif
     }
 }
 
