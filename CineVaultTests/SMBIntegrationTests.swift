@@ -13,8 +13,12 @@ final class SMBIntegrationTests: XCTestCase {
         let files = try await SMBService.shared.scanVideos(config)
 
         XCTAssertEqual(files.count, 1)
-        XCTAssertEqual(files.first?.path, "Movies/Feature (2020)/Feature (2020).mp4")
-        XCTAssertEqual(files.first?.size, 60 * 1024 * 1024)
+        let movie = try XCTUnwrap(files.first)
+        XCTAssertEqual(movie.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                       "Movies/Feature (2020)/Feature (2020).mp4")
+        XCTAssertEqual(movie.size, 60 * 1024 * 1024)
+        let bytes = try await SMBService.shared.read(config, path: movie.path, offset: 0, length: 4)
+        XCTAssertEqual(bytes, Data(repeating: 0, count: 4))
         await SMBService.shared.reset(config)
     }
 
@@ -30,13 +34,14 @@ final class SMBIntegrationTests: XCTestCase {
 
     func testInvalidPasswordIsReported() async {
         let config = configuration(password: "incorrect")
+        let service = SMBService(timeout: 2)
         do {
-            try await SMBService.shared.testConnection(config)
+            try await service.testConnection(config)
             XCTFail("An invalid password must not connect.")
         } catch {
-            await SMBService.shared.reset(config)
+            await service.reset(config)
             return
         }
-        await SMBService.shared.reset(config)
+        await service.reset(config)
     }
 }

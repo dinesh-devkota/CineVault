@@ -69,7 +69,7 @@ You need a paid Apple Developer account.
 1. **Bundle ID** — developer.apple.com → Certificates, IDs & Profiles → Identifiers → **+** → App IDs → App, bundle ID `com.dineshdevkota.cinevault` (or your own; then set repo **variable** `APP_BUNDLE_ID`).
 2. **App record** — appstoreconnect.apple.com → Apps → **+** → New App, platform **tvOS**, same bundle ID.
 3. **App Store Connect API key** — App Store Connect → Users and Access → Integrations → App Store Connect API → generate a key with **App Manager** role. Note the *Key ID* and *Issuer ID*, download the `.p8`.
-4. **Distribution certificate** (with OpenSSL, e.g. from Git Bash):
+4. **Distribution certificate** — run these OpenSSL commands (e.g. in Git Bash) from a private folder **outside the repository**. Keep the `.key`, `.p12`, `.p8`, and password private:
    ```bash
    openssl genrsa -out dist.key 2048
    openssl req -new -key dist.key -out dist.csr -subj "/emailAddress=you@example.com/CN=CineVault/C=US"
@@ -100,6 +100,13 @@ The provisioning profile is created/reused automatically by fastlane through the
 1. After the TestFlight workflow succeeds, wait for processing in App Store Connect (≈10–30 min).
 2. App Store Connect → your app → **TestFlight** → add yourself as an internal tester.
 3. On the Apple TV install **TestFlight** from the App Store, sign in with the same Apple ID, install **CineVault**. Internal builds expire after 90 days — just re-run the workflow.
+
+## Publishing to the App Store
+
+1. First install the TestFlight build and verify connecting to your NAS, browsing, and playing a movie on a real Apple TV.
+2. In App Store Connect, open your app's **tvOS** version and complete its description, screenshots, age rating, pricing, availability, support and privacy information. The simulator screenshots in `docs/screenshots/` use a sample library.
+3. Add App Review notes explaining that the app needs an SMB share, and provide a safe way for reviewers to exercise the app. Do not put private NAS credentials in the repository.
+4. Select the processed build in the **Build** section, choose **Add for Review**, and then **Submit for Review**. After Apple approves it, release it according to the availability option you selected.
 
 ## Using the app
 

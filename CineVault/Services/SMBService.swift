@@ -16,7 +16,12 @@ enum SMBError: LocalizedError {
 actor SMBService {
     static let shared = SMBService()
 
+    private let timeout: TimeInterval?
     private var managers: [SourceConfig: SMB2Manager] = [:]
+
+    init(timeout: TimeInterval? = nil) {
+        self.timeout = timeout
+    }
 
     private func manager(for config: SourceConfig) async throws -> SMB2Manager {
         if let existing = managers[config] { return existing }
@@ -25,6 +30,7 @@ actor SMBService {
         guard let url = config.serverURL, let manager = SMB2Manager(url: url, credential: credential) else {
             throw SMBError.invalidServer
         }
+        if let timeout { manager.timeout = timeout }
         try await manager.connectShare(name: config.share)
         managers[config] = manager
         return manager
@@ -57,6 +63,7 @@ actor SMBService {
         guard let url = config.serverURL, let manager = SMB2Manager(url: url, credential: credential) else {
             throw SMBError.invalidServer
         }
+        if let timeout { manager.timeout = timeout }
         return try await manager.listShares().map { $0.name }
     }
 
