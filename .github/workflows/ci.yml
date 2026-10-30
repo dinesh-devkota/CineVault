@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Core package tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: Packages/CineVaultCore
+        run: swift test
+
+  build:
+    name: Build tvOS app (unsigned)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: |
+          python3 scripts/generate_app_icons.py
+          xcodegen generate
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+            -destination 'generic/platform=tvOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 200
