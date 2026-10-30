@@ -113,8 +113,9 @@ struct MovieDetailView: View {
                 .foregroundStyle(.black)
             }
             Button {
-                movie.isWatched.toggle()
-                playbackServices.resetProgress(movie)
+                if playbackServices.resetProgress(movie) {
+                    movie.isWatched.toggle()
+                }
             } label: {
                 Label(movie.isWatched ? "Mark Unwatched" : "Mark Watched",
                       systemImage: movie.isWatched ? "eye.slash" : "checkmark")
@@ -224,9 +225,15 @@ struct EditMovieView: View {
             Section("Library") {
                 Toggle("Hidden from library", isOn: $movie.isHidden)
                 Button("Reset Progress") {
-                    playbackServices.resetProgress(movie)
-                    movie.isWatched = false
+                    if playbackServices.resetProgress(movie) {
+                        movie.isWatched = false
+                    }
                 }
+                #if CINEVAULT_COMMERCIAL
+                if let error = playbackServices.commercial.storageError {
+                    Text(error).foregroundStyle(.red)
+                }
+                #endif
                 Button("Reset to File Name") {
                     movie.isLocked = false
                     movie.tmdbID = nil

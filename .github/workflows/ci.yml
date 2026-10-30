@@ -19,6 +19,8 @@ jobs:
       - name: swift test
         working-directory: Packages/CineVaultCore
         run: swift test
+      - name: Test commercial log isolation
+        run: python3 -m unittest discover -s scripts/tests -p test_commercial_stage.py
 
   build:
     name: Build tvOS app (unsigned)

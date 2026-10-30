@@ -1,0 +1,264 @@
+name: Commercial build
+
+on:
+  workflow_dispatch:
+    inputs:
+      commercial_sha:
+        description: "Full commit SHA of the licensed commercial package"
+        required: true
+        type: string
+      upload_testflight:
+        description: "Sign and upload this build to TestFlight"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Verify the build request
+    runs-on: ubuntu-latest
+    env:
+      COMMERCIAL_SHA: ${{ inputs.commercial_sha }}
+      ACTOR: ${{ github.actor }}
+      TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Require an owner request, pinned revision, and protected environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Commercial builds must run from the trusted main branch."
+            exit 1
+          fi
+          if [[ "${ACTOR,,}" != "${REPOSITORY_OWNER,,}" || "${TRIGGERING_ACTOR,,}" != "${REPOSITORY_OWNER,,}" ]]; then
+            echo "::error::Only the repository owner can request or rerun a commercial build."
+            exit 1
+          fi
+          if [[ ! "$COMMERCIAL_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Enter the full lowercase 40-character commercial commit SHA."
+            exit 1
+          fi
+          if ! environment="$(gh api "repos/$GITHUB_REPOSITORY/environments/commercial" 2>/dev/null)"; then
+            echo "::error::Create the commercial environment with required reviewers before running this workflow."
+            exit 1
+          fi
+          if ! jq -e '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length > 0' \
+              <<<"$environment" >/dev/null; then
+            echo "::error::The commercial environment must have at least one required reviewer."
+            exit 1
+          fi
+
+  commercial:
+    name: Build the licensed app
+    needs: preflight
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: commercial
+    env:
+      APP_BUNDLE_ID: ${{ vars.APP_BUNDLE_ID || 'com.dineshdevkota.cinevault' }}
+      CINEVAULT_MONTHLY_PRODUCT_ID: ${{ vars.CINEVAULT_MONTHLY_PRODUCT_ID }}
+      CINEVAULT_LIFETIME_PRODUCT_ID: ${{ vars.CINEVAULT_LIFETIME_PRODUCT_ID }}
+    steps:
+      - name: Check out the selected public revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate product identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          monthly="${CINEVAULT_MONTHLY_PRODUCT_ID:-$APP_BUNDLE_ID.monthly}"
+          lifetime="${CINEVAULT_LIFETIME_PRODUCT_ID:-$APP_BUNDLE_ID.lifetime}"
+          for value in "$APP_BUNDLE_ID" "$monthly" "$lifetime"; do
+            if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$ ]]; then
+              echo "::error::Bundle and product identifiers must contain only letters, numbers, periods, underscores, and hyphens."
+              exit 1
+            fi
+          done
+          if [[ "$monthly" == "$lifetime" ]]; then
+            echo "::error::Monthly and lifetime products must have different identifiers."
+            exit 1
+          fi
+          printf 'CINEVAULT_MONTHLY_PRODUCT_ID=%s\n' "$monthly" >> "$GITHUB_ENV"
+          printf 'CINEVAULT_LIFETIME_PRODUCT_ID=%s\n' "$lifetime" >> "$GITHUB_ENV"
+      - name: Set up Ruby for TestFlight
+        if: inputs.upload_testflight
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Install XcodeGen and generate app icons
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          python3 scripts/generate_app_icons.py
+      - name: Check the commercial access token
+        env:
+          COMMERCIAL_REPO_TOKEN: ${{ secrets.COMMERCIAL_REPO_TOKEN }}
+        run: |
+          if [[ -z "$COMMERCIAL_REPO_TOKEN" ]]; then
+            echo "::error::Add the read-only COMMERCIAL_REPO_TOKEN environment secret."
+            exit 1
+          fi
+      - name: Check out the pinned commercial package
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: dinesh-devkota/CineVaultCommercial
+          ref: ${{ inputs.commercial_sha }}
+          token: ${{ secrets.COMMERCIAL_REPO_TOKEN }}
+          path: commercial
+          persist-credentials: false
+      - name: Verify the package revision
+        env:
+          COMMERCIAL_SHA: ${{ inputs.commercial_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$(git -C commercial rev-parse HEAD)" != "$COMMERCIAL_SHA" ]]; then
+            echo "::error::The checked-out commercial revision does not match the requested SHA."
+            exit 1
+          fi
+      - name: Test the commercial package
+        run: |
+          bash scripts/run_commercial_stage.sh "Commercial package tests" \
+            "$RUNNER_TEMP/cinevault-commercial.log" swift test --package-path commercial
+      - name: Generate the release project
+        run: |
+          bash scripts/run_commercial_stage.sh "Release project generation" \
+            "$RUNNER_TEMP/cinevault-commercial.log" xcodegen generate --spec project.commercial.yml
+      - name: Build the unsigned tvOS app
+        run: |
+          bash scripts/run_commercial_stage.sh "Unsigned tvOS build" \
+            "$RUNNER_TEMP/cinevault-commercial.log" \
+            xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+              -destination 'generic/platform=tvOS' -configuration Release \
+              CODE_SIGNING_ALLOWED=NO "PRODUCT_BUNDLE_IDENTIFIER=$APP_BUNDLE_ID" \
+              "CINEVAULT_MONTHLY_PRODUCT_ID=$CINEVAULT_MONTHLY_PRODUCT_ID" \
+              "CINEVAULT_LIFETIME_PRODUCT_ID=$CINEVAULT_LIFETIME_PRODUCT_ID" build
+      - name: Prepare commercial simulator tests
+        run: |
+          bash scripts/run_commercial_stage.sh "Simulator test dependencies" \
+            "$RUNNER_TEMP/cinevault-commercial.log" \
+            python3 -m pip install -r commercial/scripts/requirements.txt
+          bash scripts/run_commercial_stage.sh "Simulator configuration tests" \
+            "$RUNNER_TEMP/cinevault-commercial.log" \
+            python3 -m unittest discover -s commercial/scripts -p test_prepare_official.py
+          bash scripts/run_commercial_stage.sh "Simulator test configuration" \
+            "$RUNNER_TEMP/cinevault-commercial.log" \
+            python3 commercial/scripts/prepare_official.py \
+              --public-root "$GITHUB_WORKSPACE" --package-root "$GITHUB_WORKSPACE/commercial" --include-tests
+          bash scripts/run_commercial_stage.sh "Simulator project generation" \
+            "$RUNNER_TEMP/cinevault-commercial.log" xcodegen generate --spec project.commercial-tests.yml
+      - name: Select a tvOS simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk=$(xcrun --sdk appletvsimulator --show-sdk-version | tr '.' '-')
+          device=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          runtime = "com.apple.CoreSimulator.SimRuntime.tvOS-" + sys.argv[1]
+          devices = json.load(sys.stdin)["devices"].get(runtime, [])
+          candidates = [d for d in devices if d.get("isAvailable") and d["name"].startswith("Apple TV")]
+          if not candidates:
+              sys.exit("No available Apple TV simulator for " + runtime)
+          print(next((d for d in candidates if "4K" in d["name"] and "1080p" in d["name"]), candidates[0])["udid"])
+          ' "$sdk")
+          echo "device=$device" >> "$GITHUB_OUTPUT"
+      - name: Build commercial simulator tests
+        run: |
+          bash scripts/run_commercial_stage.sh "Simulator test build" \
+            "$RUNNER_TEMP/cinevault-commercial.log" \
+            xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+              -destination 'id=${{ steps.simulator.outputs.device }}' -configuration Debug \
+              -derivedDataPath "$RUNNER_TEMP/cinevault-commercial-tests" \
+              CODE_SIGNING_ALLOWED=NO build-for-testing
+          plutil -remove UIRequiredDeviceCapabilities \
+            "$RUNNER_TEMP/cinevault-commercial-tests/Build/Products/Debug-appletvsimulator/CineVault.app/Info.plist"
+      - name: Run commercial simulator tests
+        run: |
+          set -euo pipefail
+          device='${{ steps.simulator.outputs.device }}'
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          bash scripts/run_commercial_stage.sh "Simulator tests" \
+            "$RUNNER_TEMP/cinevault-commercial.log" \
+            xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+              -destination "id=$device" -configuration Debug \
+              -derivedDataPath "$RUNNER_TEMP/cinevault-commercial-tests" \
+              -parallel-testing-enabled NO -only-testing:CommercialIntegrationTests \
+              CODE_SIGNING_ALLOWED=NO test-without-building
+      - name: Regenerate the release project for TestFlight
+        if: inputs.upload_testflight
+        run: |
+          bash scripts/run_commercial_stage.sh "Release project generation" \
+            "$RUNNER_TEMP/cinevault-commercial.log" xcodegen generate --spec project.commercial.yml
+      - name: Sign and upload to TestFlight
+        if: inputs.upload_testflight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DIST_CERT_P12_BASE64: ${{ secrets.DIST_CERT_P12_BASE64 }}
+          DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64 APPLE_TEAM_ID DIST_CERT_P12_BASE64 DIST_CERT_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing the $name commercial environment secret."
+              exit 1
+            fi
+          done
+          export DIST_CERT_PATH="$RUNNER_TEMP/cinevault-dist.p12"
+          umask 077
+          printf '%s' "$DIST_CERT_P12_BASE64" | base64 --decode > "$DIST_CERT_PATH"
+          bash scripts/run_commercial_stage.sh "TestFlight upload" \
+            "$RUNNER_TEMP/cinevault-commercial.log" bundle exec fastlane beta
+      - name: Encrypt private diagnostics
+        if: failure()
+        id: diagnostics
+        env:
+          DIAGNOSTICS_CERT_BASE64: ${{ vars.COMMERCIAL_DIAGNOSTICS_CERT_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/cinevault-commercial.log"
+          cert="$RUNNER_TEMP/cinevault-diagnostics.crt"
+          encrypted="$RUNNER_TEMP/cinevault-commercial-diagnostics.p7m"
+          if [[ ! -f "$log" ]]; then exit 0; fi
+          if [[ -z "$DIAGNOSTICS_CERT_BASE64" ]]; then
+            echo "::notice::Set COMMERCIAL_DIAGNOSTICS_CERT_BASE64 to receive encrypted failure diagnostics."
+            exit 0
+          fi
+          umask 077
+          if ! printf '%s' "$DIAGNOSTICS_CERT_BASE64" | base64 --decode > "$cert" \
+              || ! openssl cms -encrypt -binary -aes-256-cbc -in "$log" -out "$encrypted" \
+                  -outform DER "$cert" >/dev/null 2>&1; then
+            echo "::warning::Could not encrypt diagnostics; no diagnostic artifact will be uploaded."
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+      - name: Upload encrypted diagnostics
+        if: failure() && steps.diagnostics.outputs.available == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: commercial-diagnostics-encrypted
+          path: ${{ runner.temp }}/cinevault-commercial-diagnostics.p7m
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove private temporary files
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/cinevault-commercial.log" "$RUNNER_TEMP/cinevault-diagnostics.crt" \
+            "$RUNNER_TEMP/cinevault-commercial-diagnostics.p7m" "$RUNNER_TEMP/cinevault-dist.p12"

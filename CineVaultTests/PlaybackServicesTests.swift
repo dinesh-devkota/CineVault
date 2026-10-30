@@ -13,7 +13,7 @@ final class PlaybackServicesTests: XCTestCase {
         movie.playbackPosition = 120
         XCTAssertTrue(services.canResume(movie))
         XCTAssertEqual(services.resumePosition(movie), 120)
-        services.resetProgress(movie)
+        XCTAssertTrue(services.resetProgress(movie))
         XCTAssertEqual(movie.playbackPosition, 0)
         XCTAssertFalse(services.canResume(movie))
         movie.playbackPosition = 120

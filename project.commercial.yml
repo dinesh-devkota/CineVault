@@ -1,0 +1,23 @@
+include: project.yml
+
+packages:
+  CineVaultCommercial:
+    path: commercial
+
+targets:
+  CineVault:
+    dependencies:
+      - package: CineVaultCommercial
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CINEVAULT_COMMERCIAL"
+        CINEVAULT_MONTHLY_PRODUCT_ID: com.dineshdevkota.cinevault.monthly
+        CINEVAULT_LIFETIME_PRODUCT_ID: com.dineshdevkota.cinevault.lifetime
+    info:
+      properties:
+        CineVaultMonthlyProductID: $(CINEVAULT_MONTHLY_PRODUCT_ID)
+        CineVaultLifetimeProductID: $(CINEVAULT_LIFETIME_PRODUCT_ID)
+  CineVaultTests:
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CINEVAULT_COMMERCIAL"

@@ -40,10 +40,12 @@ final class PlaybackServices: ObservableObject {
         #endif
     }
 
-    func resetProgress(_ movie: Movie) {
+    @discardableResult
+    func resetProgress(_ movie: Movie) -> Bool {
         #if CINEVAULT_COMMERCIAL
-        commercial.discardResume(mediaID: movie.id.uuidString)
+        guard commercial.discardResume(mediaID: movie.id.uuidString) else { return false }
         #endif
         movie.playbackPosition = 0
+        return true
     }
 }
