@@ -89,6 +89,7 @@ final class PlaybackController: ObservableObject {
     #endif
     private let loader: SMBResourceLoader
     private let movie: Movie
+    private var finishedPlayback = false
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
 
@@ -114,7 +115,14 @@ final class PlaybackController: ObservableObject {
             MainActor.assumeIsolated { self?.record(time: time.seconds) }
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.finish() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.player.currentItem?.forwardPlaybackEndTime.isValid == true {
+                    self.record(time: self.player.currentTime().seconds)
+                } else {
+                    self.finish()
+                }
+            }
         }
     }
 
@@ -130,20 +138,26 @@ final class PlaybackController: ObservableObject {
         return [item(.commonIdentifierTitle, movie.title), item(.commonIdentifierDescription, movie.overview)].compactMap { $0 }
     }
 
-    private func record(time: Double) {
-        guard time.isFinite, time > 0 else { return }
+    func record(time: Double) {
+        guard !finishedPlayback, time.isFinite, time > 0 else { return }
+        let boundary = player.currentItem?.forwardPlaybackEndTime
+        let limit = boundary.flatMap { $0.isValid && $0.seconds.isFinite ? $0.seconds : nil }
+        let position = limit.map { min(time, $0) } ?? time
+        guard position > 0 else { return }
         if let duration = player.currentItem?.duration.seconds, duration.isFinite, duration > 0 {
             movie.duration = duration
-            if time / duration > 0.92 {
+            if position / duration > 0.92 {
                 finish()
                 return
             }
         }
-        movie.playbackPosition = time
+        movie.isWatched = false
+        movie.playbackPosition = position
         movie.lastPlayedAt = Date()
     }
 
     private func finish() {
+        finishedPlayback = true
         movie.isWatched = true
         movie.playbackPosition = 0
         movie.lastPlayedAt = Date()
