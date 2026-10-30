@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 import SwiftUI
 
@@ -7,10 +8,21 @@ struct CineVaultApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            if DesignPreview.isEnabled {
+                DesignPreview()
+                    .environmentObject(scanner)
+            } else {
+                RootView()
+                    .environmentObject(scanner)
+                    .modelContainer(for: [MediaSource.self, Movie.self])
+            }
+            #else
             RootView()
                 .environmentObject(scanner)
+                .modelContainer(for: [MediaSource.self, Movie.self])
+            #endif
         }
-        .modelContainer(for: [MediaSource.self, Movie.self])
     }
 }
 
@@ -28,7 +40,12 @@ struct RootView: View {
         }
         .tint(CinemaTheme.accent)
         .preferredColorScheme(.dark)
-        .task { await scanner.scanAll(context: context) }
+        .task {
+            #if DEBUG
+            if DesignPreview.isEnabled { return }
+            #endif
+            await scanner.scanAll(context: context)
+        }
     }
 }
 

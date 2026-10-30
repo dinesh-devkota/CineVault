@@ -8,6 +8,19 @@ enum CinemaTheme {
     static let secondaryText = Color.white.opacity(0.66)
     static let posterWidth: CGFloat = 240
     static let posterHeight: CGFloat = 360
+
+    static func artworkColors(for title: String) -> [Color] {
+        let palette = [
+            Color(red: 0.14, green: 0.33, blue: 0.38),
+            Color(red: 0.31, green: 0.18, blue: 0.28),
+            Color(red: 0.30, green: 0.25, blue: 0.15),
+            Color(red: 0.15, green: 0.23, blue: 0.38),
+            Color(red: 0.18, green: 0.30, blue: 0.23),
+            Color(red: 0.34, green: 0.18, blue: 0.15),
+        ]
+        let index = title.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % palette.count }
+        return [palette[index], background]
+    }
 }
 
 struct CinemaBackground: View {
@@ -37,7 +50,7 @@ struct MovieBackdrop: View {
         GeometryReader { geometry in
             ZStack {
                 LinearGradient(
-                    colors: [Color(red: 0.16, green: 0.23, blue: 0.26), CinemaTheme.background],
+                    colors: CinemaTheme.artworkColors(for: movie.title),
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )

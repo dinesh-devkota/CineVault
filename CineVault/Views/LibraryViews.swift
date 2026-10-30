@@ -369,7 +369,7 @@ struct PosterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack {
-                LinearGradient(colors: [Color(red: 0.18, green: 0.25, blue: 0.29), CinemaTheme.background],
+                LinearGradient(colors: CinemaTheme.artworkColors(for: movie.title),
                                startPoint: .topLeading, endPoint: .bottomTrailing)
                 VStack(spacing: 18) {
                     Image(systemName: "film")
