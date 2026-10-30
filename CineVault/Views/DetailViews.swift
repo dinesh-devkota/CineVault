@@ -114,7 +114,7 @@ struct MovieDetailView: View {
             }
             Button {
                 movie.isWatched.toggle()
-                movie.playbackPosition = 0
+                playbackServices.resetProgress(movie)
             } label: {
                 Label(movie.isWatched ? "Mark Unwatched" : "Mark Watched",
                       systemImage: movie.isWatched ? "eye.slash" : "checkmark")
@@ -179,6 +179,7 @@ extension PlaybackController: Identifiable {}
 struct EditMovieView: View {
     @Bindable var movie: Movie
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var playbackServices: PlaybackServices
     @State private var title = ""
     @State private var year = ""
     @State private var query = ""
@@ -222,7 +223,10 @@ struct EditMovieView: View {
             }
             Section("Library") {
                 Toggle("Hidden from library", isOn: $movie.isHidden)
-                Button("Reset Progress") { movie.playbackPosition = 0; movie.isWatched = false }
+                Button("Reset Progress") {
+                    playbackServices.resetProgress(movie)
+                    movie.isWatched = false
+                }
                 Button("Reset to File Name") {
                     movie.isLocked = false
                     movie.tmdbID = nil
