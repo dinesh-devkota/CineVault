@@ -32,6 +32,15 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum LibrarySearch {
+    static func matches(_ movie: Movie, text: String, normalized: String) -> Bool {
+        !movie.isMissing && !movie.isHidden &&
+            ((!normalized.isEmpty && TitleMatcher.normalize(movie.title).contains(normalized))
+             || movie.genres.contains { $0.localizedCaseInsensitiveContains(text) }
+             || movie.fileName.localizedCaseInsensitiveContains(text))
+    }
+}
+
 struct LibraryView: View {
     @Query private var movies: [Movie]
     @AppStorage("librarySort") private var sort: LibrarySort = .title
@@ -161,11 +170,7 @@ struct SearchView: View {
     private var results: [Movie] {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let needle = TitleMatcher.normalize(text)
-        return movies.filter { movie in
-            !movie.isMissing && ((!needle.isEmpty && TitleMatcher.normalize(movie.title).contains(needle))
-                || movie.genres.contains { $0.localizedCaseInsensitiveContains(text) }
-                || movie.fileName.localizedCaseInsensitiveContains(text))
-        }
+        return movies.filter { LibrarySearch.matches($0, text: text, normalized: needle) }
         .sorted { $0.sortTitle < $1.sortTitle }
     }
 

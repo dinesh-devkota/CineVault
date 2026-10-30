@@ -24,14 +24,21 @@ final class MediaSource {
         self.username = username
     }
 
-    var password: String {
-        get { Keychain.get("source-\(id.uuidString)") ?? "" }
-        set { Keychain.set(newValue, for: "source-\(id.uuidString)") }
+    private var passwordAccount: String { "source-\(id.uuidString)" }
+
+    func password() throws -> String {
+        try Keychain.get(passwordAccount) ?? ""
     }
 
-    var config: SourceConfig {
-        SourceConfig(id: id, host: host, port: port, share: share, rootPath: rootPath,
-                     username: username, password: password)
+    func setPassword(_ value: String) throws {
+        try Keychain.set(value, for: passwordAccount)
+    }
+
+    func config() throws -> SourceConfig {
+        var secret = ""
+        if !username.isEmpty { secret = try password() }
+        return SourceConfig(id: id, host: host, port: port, share: share, rootPath: rootPath,
+                            username: username, password: secret)
     }
 }
 

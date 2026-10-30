@@ -57,18 +57,12 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
                 info.isByteRangeAccessSupported = true
             }
             if let dataRequest = request.dataRequest {
-                var offset = dataRequest.currentOffset > 0 ? dataRequest.currentOffset : dataRequest.requestedOffset
+                let offset = dataRequest.currentOffset > 0 ? dataRequest.currentOffset : dataRequest.requestedOffset
                 let end = dataRequest.requestsAllDataToEndOfResource
                     ? size
                     : min(size, dataRequest.requestedOffset + Int64(dataRequest.requestedLength))
-                while offset < end {
-                    try Task.checkCancellation()
-                    let length = Int(min(Self.chunkSize, end - offset))
-                    let data = try await SMBService.shared.read(config, path: path, offset: offset, length: length)
-                    if data.isEmpty { break }
-                    try Task.checkCancellation()
+                try await streamBytes(from: offset, to: end) { data in
                     dataRequest.respond(with: data)
-                    offset += Int64(data.count)
                 }
             }
             request.finishLoading()
@@ -76,6 +70,19 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
             // AVPlayer cancelled this range (seek or enough buffered).
         } catch {
             request.finishLoading(with: error)
+        }
+    }
+
+    func streamBytes(from start: Int64, to end: Int64, respond: (Data) -> Void) async throws {
+        var offset = start
+        while offset < end {
+            try Task.checkCancellation()
+            let length = Int(min(Self.chunkSize, end - offset))
+            let data = try await SMBService.shared.read(config, path: path, offset: offset, length: length)
+            try Task.checkCancellation()
+            guard !data.isEmpty else { throw SMBError.unexpectedEndOfFile }
+            respond(data)
+            offset += Int64(data.count)
         }
     }
 }
@@ -93,10 +100,10 @@ final class PlaybackController: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
 
-    init?(movie: Movie, resume: Bool, services: PlaybackServices) {
+    init?(movie: Movie, resume: Bool, services: PlaybackServices) throws {
         guard let source = movie.source else { return nil }
         self.movie = movie
-        loader = SMBResourceLoader(config: source.config, path: movie.filePath, knownSize: movie.fileSize)
+        loader = SMBResourceLoader(config: try source.config(), path: movie.filePath, knownSize: movie.fileSize)
         let item = AVPlayerItem(asset: loader.makeAsset())
         item.externalMetadata = Self.metadata(for: movie)
         let player = AVPlayer(playerItem: item)

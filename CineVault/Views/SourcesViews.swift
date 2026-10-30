@@ -58,9 +58,12 @@ struct SourceEditorView: View {
     @State private var shares: [String] = []
     @State private var message: String?
     @State private var busy = false
+    @State private var draftID = UUID()
+    @State private var credentialReadFailed = false
+    @State private var deletedSourceID: UUID?
 
     private var config: SourceConfig {
-        SourceConfig(id: source?.id ?? UUID(), host: host.trimmingCharacters(in: .whitespaces), port: Int(port),
+        SourceConfig(id: source?.id ?? draftID, host: host.trimmingCharacters(in: .whitespaces), port: Int(port),
                      share: share, rootPath: rootPath.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")),
                      username: username, password: password)
     }
@@ -84,19 +87,33 @@ struct SourceEditorView: View {
                 TextField("Folder inside share (e.g. Movies)", text: $rootPath)
             }
             Section {
-                Button("List Shares") { run { shares = try await SMBService.shared.listShares(config) } }
-                Button("Test Connection") {
-                    run {
-                        try await SMBService.shared.testConnection(config)
-                        message = "Connected successfully."
+                if let deletedSourceID {
+                    Button("Retry Removing Stored Password") { removePassword(for: deletedSourceID) }
+                } else {
+                    Button("List Shares") { run { shares = try await SMBService.shared.listShares(config) } }
+                        .disabled(busy || scanner.isScanning)
+                    Button("Test Connection") {
+                        run {
+                            try await SMBService.shared.testConnection(config)
+                            message = "Connected successfully."
+                        }
+                    }
+                    .disabled(busy || scanner.isScanning)
+                    Button("Save & Scan") { save() }
+                        .disabled(config.host.isEmpty || share.isEmpty || busy || scanner.isScanning || credentialReadFailed)
+                    if source != nil {
+                        Button("Delete Source", role: .destructive) { delete() }
+                            .disabled(busy || scanner.isScanning)
                     }
                 }
-                Button("Save & Scan") { save() }.disabled(host.isEmpty || share.isEmpty)
-                if source != nil {
-                    Button("Delete Source", role: .destructive) { delete() }
-                }
             } footer: {
-                if busy { ProgressView() } else if let message { Text(message) }
+                if busy {
+                    ProgressView()
+                } else if let message {
+                    Text(message)
+                } else if scanner.isScanning {
+                    Text("Wait for the current scan to finish.")
+                }
             }
         }
         .navigationTitle(source == nil ? "Add NAS" : "Edit Source")
@@ -111,7 +128,12 @@ struct SourceEditorView: View {
         share = source.share
         rootPath = source.rootPath
         username = source.username
-        password = source.password
+        do {
+            password = try source.password()
+        } catch {
+            credentialReadFailed = true
+            message = "Could not read the saved password: \(error.localizedDescription)"
+        }
     }
 
     private func run(_ work: @escaping () async throws -> Void) {
@@ -124,8 +146,19 @@ struct SourceEditorView: View {
     }
 
     private func save() {
+        guard !scanner.isScanning, !busy, !credentialReadFailed else { return }
         let c = config
         let target = source ?? MediaSource(name: "", host: "", share: "", rootPath: "", username: "")
+        if source == nil { target.id = c.id }
+        let oldPassword: String
+        do {
+            oldPassword = try target.password()
+            try target.setPassword(password)
+        } catch {
+            message = "Could not save the password: \(error.localizedDescription)"
+            return
+        }
+        let oldValues = (target.name, target.host, target.port, target.share, target.rootPath, target.username)
         target.name = name.isEmpty ? c.host : name
         target.host = c.host
         target.port = c.port
@@ -133,21 +166,50 @@ struct SourceEditorView: View {
         target.rootPath = c.rootPath
         target.username = c.username
         if source == nil { context.insert(target) }
-        target.password = password
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            if source == nil {
+                context.delete(target)
+            } else {
+                (target.name, target.host, target.port, target.share, target.rootPath, target.username) = oldValues
+            }
+            do {
+                try target.setPassword(oldPassword)
+                message = "Could not save the source: \(error.localizedDescription)"
+            } catch let restoreError {
+                message = "Could not save the source, and its password could not be restored: \(restoreError.localizedDescription)"
+            }
+            return
+        }
         Task {
-            await SMBService.shared.reset(c)
+            await SMBService.shared.reset(sourceID: target.id)
             await scanner.scan(target, context: context)
         }
         dismiss()
     }
 
     private func delete() {
-        guard let source else { return }
-        Keychain.delete("source-\(source.id.uuidString)")
+        guard let source, !scanner.isScanning, !busy else { return }
+        let id = source.id
         context.delete(source)
-        try? context.save()
-        dismiss()
+        do {
+            try context.save()
+            deletedSourceID = id
+            Task { await SMBService.shared.reset(sourceID: id) }
+            removePassword(for: id)
+        } catch {
+            message = "Could not delete the source: \(error.localizedDescription)"
+        }
+    }
+
+    private func removePassword(for id: UUID) {
+        do {
+            try Keychain.delete("source-\(id.uuidString)")
+            dismiss()
+        } catch {
+            message = "Source removed, but its saved password could not be deleted: \(error.localizedDescription)"
+        }
     }
 }
 
@@ -156,6 +218,7 @@ struct SettingsView: View {
     @EnvironmentObject private var playbackServices: PlaybackServices
     @State private var apiKey = ""
     @State private var message: String?
+    @State private var credentialReadFailed = false
 
     var body: some View {
         Form {
@@ -169,20 +232,22 @@ struct SettingsView: View {
             Section {
                 SecureField("TMDB API key or read access token", text: $apiKey)
                 Button("Save Key & Fetch Missing Metadata") {
-                    MetadataService.shared.apiKey = apiKey
-                    message = "Fetching metadata…"
-                    Task {
-                        await MetadataService.shared.fetchMissing(in: context)
-                        message = "Done."
+                    do {
+                        try MetadataService.shared.setAPIKey(apiKey)
+                        if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            message = "TMDB key removed."
+                        } else {
+                            message = "Fetching metadata…"
+                            Task { await fetchMetadata(refreshAll: false) }
+                        }
+                    } catch {
+                        message = "Could not save the TMDB key: \(error.localizedDescription)"
                     }
                 }
+                .disabled(credentialReadFailed)
                 Button("Refresh All Metadata") {
-                    Task {
-                        let movies = (try? context.fetch(FetchDescriptor<Movie>())) ?? []
-                        movies.forEach { $0.metadataFetched = false }
-                        await MetadataService.shared.fetchMissing(in: context)
-                        message = "Refreshed \(movies.count) movies."
-                    }
+                    message = "Refreshing metadata…"
+                    Task { await fetchMetadata(refreshAll: true) }
                 }
             } header: {
                 Text("Metadata (themoviedb.org)")
@@ -196,6 +261,34 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
-        .onAppear { apiKey = MetadataService.shared.apiKey }
+        .onAppear {
+            do {
+                apiKey = try MetadataService.shared.apiKey
+                credentialReadFailed = false
+            } catch {
+                credentialReadFailed = true
+                message = "Could not read the TMDB key: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func fetchMetadata(refreshAll: Bool) async {
+        do {
+            guard try MetadataService.shared.hasKey else {
+                message = "Add a TMDB key in Settings first."
+                return
+            }
+            var count: Int?
+            if refreshAll {
+                let movies = try context.fetch(FetchDescriptor<Movie>())
+                movies.forEach { $0.metadataFetched = false }
+                try context.save()
+                count = movies.count
+            }
+            let result = try await MetadataService.shared.fetchMissing(in: context)
+            message = result?.failureMessage ?? count.map { "Refreshed \($0) movies." } ?? "Metadata update complete."
+        } catch {
+            message = "Could not update metadata: \(error.localizedDescription)"
+        }
     }
 }

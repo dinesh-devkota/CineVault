@@ -7,9 +7,16 @@ struct RemoteFile: Sendable {
     let size: Int64
 }
 
-enum SMBError: LocalizedError {
+enum SMBError: LocalizedError, Equatable {
     case invalidServer
-    var errorDescription: String? { "Invalid server address." }
+    case unexpectedEndOfFile
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidServer: return "Invalid server address."
+        case .unexpectedEndOfFile: return "The NAS file ended unexpectedly. Rescan the source and retry."
+        }
+    }
 }
 
 /// Owns one connected SMB2Manager per source and exposes the few operations the app needs.
@@ -42,12 +49,23 @@ actor SMBService {
         }
     }
 
+    func reset(sourceID: UUID) async {
+        let stale = managers.filter { $0.key.id == sourceID }
+        for config in stale.keys { managers.removeValue(forKey: config) }
+        for manager in stale.values { try? await manager.disconnectShare(gracefully: false) }
+    }
+
     /// Retries once with a fresh connection (NAS may drop idle sessions).
     private func withManager<T>(_ config: SourceConfig, _ body: (SMB2Manager) async throws -> T) async throws -> T {
+        try Task.checkCancellation()
         do {
             return try await body(try await manager(for: config))
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            try Task.checkCancellation()
             await reset(config)
+            try Task.checkCancellation()
             return try await body(try await manager(for: config))
         }
     }

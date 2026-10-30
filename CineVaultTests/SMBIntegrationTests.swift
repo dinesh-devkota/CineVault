@@ -83,6 +83,20 @@ final class SMBIntegrationTests: XCTestCase {
         await SMBService.shared.reset(config)
     }
 
+    func testTruncatedRangeReportsUnexpectedEnd() async throws {
+        let config = configuration()
+        let loader = SMBResourceLoader(config: config, path: "Movies/Feature (2020)/bytes.bin", knownSize: 12)
+        var received = Data()
+        do {
+            try await loader.streamBytes(from: 0, to: 12) { received.append($0) }
+            XCTFail("An incomplete byte range must not succeed.")
+        } catch {
+            XCTAssertEqual(error as? SMBError, .unexpectedEndOfFile)
+        }
+        XCTAssertEqual(received, Data("0123456789".utf8))
+        await SMBService.shared.reset(config)
+    }
+
     func testInvalidPasswordIsReported() async {
         let config = configuration(password: "incorrect")
         let service = SMBService(timeout: 2)

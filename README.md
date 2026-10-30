@@ -6,6 +6,7 @@ A Plex-style movie library for **Apple TV** that reads your movies **directly fr
 
 - Add one or more NAS sources (SMB2/3: Synology, QNAP, TrueNAS, Windows shares…). Passwords live in the Keychain.
 - Recursive scan for movie files; skips samples, trailers, extras and NAS metadata folders (`@eaDir`, `#recycle`, …).
+- NAS credential, scan, and TMDB lookup errors are shown in the app rather than silently reported as successful.
 - Smart filename parsing (`The.Matrix.1999.1080p.BluRay.x264-GRP.mkv` → *The Matrix (1999)*), folder fallback (`Heat (1995)/movie.mkv`) and `{tmdb-123}` tags.
 - Posters, backdrops, overview, genres, runtime and rating from TMDB (your own free API key).
 - Cinematic Apple TV browsing with backdrop artwork, landscape Continue Watching cards, focus-aware posters, a movie detail screen, and a dark, uncluttered interface.

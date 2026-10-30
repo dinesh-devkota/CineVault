@@ -12,6 +12,8 @@ struct MovieDetailView: View {
     @State private var editing = false
     @State private var unsupported = false
     @State private var missingSource = false
+    @State private var credentialUnavailable = false
+    @State private var credentialMessage = ""
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -87,6 +89,11 @@ struct MovieDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("This movie no longer has a NAS source. Add the source again and rescan before playing.")
+        }
+        .alert("NAS credentials unavailable", isPresented: $credentialUnavailable) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(credentialMessage)
         }
     }
 
@@ -166,11 +173,16 @@ struct MovieDetailView: View {
             unsupported = true
             return
         }
-        guard let controller = PlaybackController(movie: movie, resume: resume, services: playbackServices) else {
-            missingSource = true
-            return
+        do {
+            guard let controller = try PlaybackController(movie: movie, resume: resume, services: playbackServices) else {
+                missingSource = true
+                return
+            }
+            playback = controller
+        } catch {
+            credentialMessage = error.localizedDescription
+            credentialUnavailable = true
         }
-        playback = controller
     }
 }
 
@@ -196,8 +208,12 @@ struct EditMovieView: View {
                     movie.setTitle(title)
                     movie.year = Int(year)
                     movie.isLocked = true
-                    try? movie.modelContext?.save()
-                    dismiss()
+                    do {
+                        try movie.modelContext?.save()
+                        dismiss()
+                    } catch {
+                        message = "Could not save the movie: \(error.localizedDescription)"
+                    }
                 }
             }
             Section {
@@ -240,8 +256,17 @@ struct EditMovieView: View {
                     movie.setTitle(movie.parsedTitle)
                     movie.year = movie.parsedYear
                     movie.metadataFetched = false
-                    Task { try? await MetadataService.shared.match(movie) }
-                    dismiss()
+                    Task {
+                        do {
+                            if try MetadataService.shared.hasKey {
+                                try await MetadataService.shared.match(movie)
+                            }
+                            try movie.modelContext?.save()
+                            dismiss()
+                        } catch {
+                            message = "Could not reset the movie: \(error.localizedDescription)"
+                        }
+                    }
                 }
             }
         }
@@ -254,12 +279,12 @@ struct EditMovieView: View {
     }
 
     private func search() {
-        guard MetadataService.shared.hasKey else {
-            message = "Add a TMDB key in Settings first."
-            return
-        }
         Task {
             do {
+                guard try MetadataService.shared.hasKey else {
+                    message = "Add a TMDB key in Settings first."
+                    return
+                }
                 results = try await MetadataService.shared.search(title: query, year: nil)
                 message = results.isEmpty ? "No results." : nil
             } catch {
@@ -273,7 +298,7 @@ struct EditMovieView: View {
             do {
                 try await MetadataService.shared.apply(tmdbID: result.id, to: movie, force: true)
                 movie.isLocked = true
-                try? movie.modelContext?.save()
+                try movie.modelContext?.save()
                 dismiss()
             } catch {
                 message = error.localizedDescription

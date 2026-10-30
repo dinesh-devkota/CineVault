@@ -7,14 +7,32 @@ import SwiftData
 final class LibraryScanner: ObservableObject {
     @Published private(set) var isScanning = false
     @Published var status: String?
+    private let scanVideos: (SourceConfig) async throws -> [RemoteFile]
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(scanVideos: @escaping (SourceConfig) async throws -> [RemoteFile] = {
+        try await SMBService.shared.scanVideos($0)
+    }) {
+        self.scanVideos = scanVideos
+    }
 
     func scan(_ source: MediaSource, context: ModelContext) async {
-        guard !isScanning else { return }
-        isScanning = true
+        if isScanning {
+            await withCheckedContinuation { waiters.append($0) }
+        } else {
+            isScanning = true
+        }
+        defer {
+            if waiters.isEmpty {
+                isScanning = false
+            } else {
+                waiters.removeFirst().resume()
+            }
+        }
+        guard !Task.isCancelled else { return }
         status = "Scanning \(source.name)…"
-        defer { isScanning = false }
         do {
-            let files = try await SMBService.shared.scanVideos(source.config)
+            let files = try await scanVideos(source.config())
             var existing = Dictionary(source.movies.map { ($0.filePath, $0) }, uniquingKeysWith: { a, _ in a })
             var added = 0
             for file in files {
@@ -36,15 +54,27 @@ final class LibraryScanner: ObservableObject {
             for movie in existing.values { movie.isMissing = true }
             source.lastScanDate = Date()
             try context.save()
-            status = "\(source.name): \(files.count) movies (\(added) new)"
-            await MetadataService.shared.fetchMissing(in: context)
+            let scanStatus = "\(source.name): \(files.count) movies (\(added) new)"
+            status = scanStatus
+            do {
+                let result = try await MetadataService.shared.fetchMissing(in: context)
+                if let failure = result?.failureMessage {
+                    status = "\(scanStatus). \(failure)"
+                }
+            } catch {
+                status = "\(scanStatus). Metadata update failed: \(error.localizedDescription)"
+            }
         } catch {
             status = "Scan failed for \(source.name): \(error.localizedDescription)"
         }
     }
 
     func scanAll(context: ModelContext) async {
-        let sources = (try? context.fetch(FetchDescriptor<MediaSource>())) ?? []
-        for source in sources { await scan(source, context: context) }
+        do {
+            let sources = try context.fetch(FetchDescriptor<MediaSource>())
+            for source in sources { await scan(source, context: context) }
+        } catch {
+            status = "Could not load NAS sources: \(error.localizedDescription)"
+        }
     }
 }
