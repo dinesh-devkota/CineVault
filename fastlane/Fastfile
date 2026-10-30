@@ -1,0 +1,52 @@
+default_platform(:ios)
+
+BUNDLE_ID = ENV.fetch("APP_BUNDLE_ID", "com.dineshdevkota.cinevault")
+
+platform :ios do
+  desc "Build CineVault for tvOS and upload it to TestFlight"
+  lane :beta do
+    setup_ci
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_P8_BASE64"),
+      is_key_content_base64: true
+    )
+
+    import_certificate(
+      certificate_path: ENV.fetch("DIST_CERT_PATH"),
+      certificate_password: ENV.fetch("DIST_CERT_PASSWORD"),
+      keychain_name: "fastlane_tmp_keychain",
+      keychain_password: ""
+    )
+
+    # Creates or reuses the tvOS App Store provisioning profile.
+    get_provisioning_profile(api_key: api_key, app_identifier: BUNDLE_ID, platform: "tvos")
+    profile_name = lane_context[SharedValues::SIGH_NAME]
+
+    update_code_signing_settings(
+      path: "CineVault.xcodeproj",
+      targets: ["CineVault"],
+      use_automatic_signing: false,
+      team_id: ENV.fetch("APPLE_TEAM_ID"),
+      bundle_identifier: BUNDLE_ID,
+      code_sign_identity: "Apple Distribution",
+      profile_name: profile_name
+    )
+
+    build_number = ENV.fetch("GITHUB_RUN_NUMBER", Time.now.strftime("%Y%m%d%H%M"))
+    build_app(
+      project: "CineVault.xcodeproj",
+      scheme: "CineVault",
+      configuration: "Release",
+      destination: "generic/platform=tvOS",
+      export_method: "app-store",
+      export_options: { provisioningProfiles: { BUNDLE_ID => profile_name } },
+      xcargs: "CURRENT_PROJECT_VERSION=#{build_number} PRODUCT_BUNDLE_IDENTIFIER=#{BUNDLE_ID} DEVELOPMENT_TEAM=#{ENV.fetch('APPLE_TEAM_ID')}",
+      output_directory: "build"
+    )
+
+    upload_to_testflight(api_key: api_key, app_platform: "appletvos", skip_waiting_for_build_processing: true)
+  end
+end
