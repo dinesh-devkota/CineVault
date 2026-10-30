@@ -19,6 +19,18 @@ A Plex-style movie library for **Apple TV** that reads your movies **directly fr
 
 tvOS' built-in player plays **MP4 / M4V / MOV** (H.264, HEVC, AAC, AC3/E-AC3). MKV/AVI etc. are listed but show a "format not supported" message. Remux them losslessly on the NAS, e.g. `ffmpeg -i in.mkv -c copy -map 0 out.mp4`. (VLCKit could be added later as a fallback player.)
 
+## Screenshots
+
+Apple TV simulator previews with a sample library and placeholder artwork:
+
+**Home**
+
+![CineVault home screen](docs/screenshots/home.png)
+
+**Movie details**
+
+![CineVault movie detail screen](docs/screenshots/movie-detail.png)
+
 ## Project layout
 
 | Path | What |
