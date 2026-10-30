@@ -123,8 +123,8 @@ Tip: naming folders `Title (Year)/Title (Year).mp4` gives the best matches; add 
 cd Packages/CineVaultCore && swift test
 ```
 
-The **NAS integration** workflow also checks authenticated SMB scanning and byte-range
-reads on an Apple TV simulator. It creates a temporary local test share with sample data;
-it does not connect to your NAS.
+The **NAS integration** workflow also checks authenticated SMB scanning, byte-range
+reads, and AVPlayer playback and seeking on an Apple TV simulator. It creates a temporary
+local test share with a synthetic video; it does not connect to your NAS.
 
 *This product uses the TMDB API but is not endorsed or certified by TMDB.*
