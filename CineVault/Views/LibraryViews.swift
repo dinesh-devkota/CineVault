@@ -126,7 +126,7 @@ struct SearchView: View {
 
 struct PosterGrid: View {
     let movies: [Movie]
-    private let columns = Array(repeating: GridItem(.fixed(260), spacing: 50), count: 6)
+    private let columns = [GridItem(.adaptive(minimum: 260, maximum: 260), spacing: 50)]
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 60) {
