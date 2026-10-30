@@ -1,0 +1,101 @@
+import AMSMB2
+import CineVaultCore
+import Foundation
+
+struct RemoteFile: Sendable {
+    let path: String
+    let size: Int64
+}
+
+enum SMBError: LocalizedError {
+    case invalidServer
+    var errorDescription: String? { "Invalid server address." }
+}
+
+/// Owns one connected SMB2Manager per source and exposes the few operations the app needs.
+actor SMBService {
+    static let shared = SMBService()
+
+    private var managers: [SourceConfig: SMB2Manager] = [:]
+
+    private func manager(for config: SourceConfig) async throws -> SMB2Manager {
+        if let existing = managers[config] { return existing }
+        let credential = config.username.isEmpty ? nil
+            : URLCredential(user: config.username, password: config.password, persistence: .forSession)
+        guard let url = config.serverURL, let manager = SMB2Manager(url: url, credential: credential) else {
+            throw SMBError.invalidServer
+        }
+        try await manager.connectShare(name: config.share)
+        managers[config] = manager
+        return manager
+    }
+
+    func reset(_ config: SourceConfig) async {
+        if let manager = managers.removeValue(forKey: config) {
+            try? await manager.disconnectShare(gracefully: false)
+        }
+    }
+
+    /// Retries once with a fresh connection (NAS may drop idle sessions).
+    private func withManager<T>(_ config: SourceConfig, _ body: (SMB2Manager) async throws -> T) async throws -> T {
+        do {
+            return try await body(try await manager(for: config))
+        } catch {
+            await reset(config)
+            return try await body(try await manager(for: config))
+        }
+    }
+
+    func testConnection(_ config: SourceConfig) async throws {
+        await reset(config)
+        _ = try await withManager(config) { try await $0.contentsOfDirectory(atPath: config.rootPath) }
+    }
+
+    func listShares(_ config: SourceConfig) async throws -> [String] {
+        let credential = config.username.isEmpty ? nil
+            : URLCredential(user: config.username, password: config.password, persistence: .forSession)
+        guard let url = config.serverURL, let manager = SMB2Manager(url: url, credential: credential) else {
+            throw SMBError.invalidServer
+        }
+        return try await manager.listShares().map { $0.name }
+    }
+
+    /// Recursively lists indexable video files below the source's root folder.
+    func scanVideos(_ config: SourceConfig) async throws -> [RemoteFile] {
+        try await withManager(config) { manager in
+            var results: [RemoteFile] = []
+            var pending = [config.rootPath]
+            while let dir = pending.popLast() {
+                try Task.checkCancellation()
+                let entries = try await manager.contentsOfDirectory(atPath: dir)
+                for entry in entries {
+                    guard let name = entry[.nameKey] as? String else { continue }
+                    let path = (entry[.pathKey] as? String) ?? (dir as NSString).appendingPathComponent(name)
+                    if (entry[.isDirectoryKey] as? Bool) == true {
+                        if !VideoFile.shouldSkipDirectory(name: name) { pending.append(path) }
+                    } else {
+                        let size = (entry[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
+                        if VideoFile.shouldIndex(path: path, size: size) {
+                            results.append(RemoteFile(path: path, size: size))
+                        }
+                    }
+                }
+            }
+            return results
+        }
+    }
+
+    func read(_ config: SourceConfig, path: String, offset: Int64, length: Int) async throws -> Data {
+        try await withManager(config) { manager in
+            let lower = UInt64(offset)
+            return try await manager.contents(atPath: path, range: lower..<(lower + UInt64(length)), progress: nil)
+        }
+    }
+
+    func fileSize(_ config: SourceConfig, path: String) async throws -> Int64 {
+        try await withManager(config) { manager in
+            let attributes = try await manager.attributesOfItem(atPath: path)
+            return (attributes[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
+        }
+    }
+}
