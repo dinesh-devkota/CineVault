@@ -61,9 +61,21 @@ jobs:
             exit 1
           fi
           xcrun simctl io "$DEVICE" screenshot "$RUNNER_TEMP/cinevault-home.png"
+          xcrun simctl terminate "$DEVICE" com.dineshdevkota.cinevault
+          LAUNCH=$(xcrun simctl launch "$DEVICE" com.dineshdevkota.cinevault --ui-preview-detail)
+          echo "$LAUNCH"
+          PID="${LAUNCH##*: }"
+          sleep 12
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "CineVault exited before the detail screenshot was captured." >&2
+            exit 1
+          fi
+          xcrun simctl io "$DEVICE" screenshot "$RUNNER_TEMP/cinevault-detail.png"
       - uses: actions/upload-artifact@v4
         with:
           name: cinevault-ui-preview
-          path: ${{ runner.temp }}/cinevault-home.png
+          path: |
+            ${{ runner.temp }}/cinevault-home.png
+            ${{ runner.temp }}/cinevault-detail.png
           if-no-files-found: error
           retention-days: 7

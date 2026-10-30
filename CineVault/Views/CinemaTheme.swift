@@ -38,6 +38,32 @@ struct CinemaBackground: View {
     }
 }
 
+struct ArtworkFallback: View {
+    let title: String
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            ZStack {
+                LinearGradient(colors: CinemaTheme.artworkColors(for: title),
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: width * 0.65, height: width * 0.65)
+                    .position(x: width * 0.82, y: height * 0.12)
+                Circle()
+                    .strokeBorder(.white.opacity(0.07), lineWidth: 2)
+                    .frame(width: width * 0.85, height: width * 0.85)
+                    .position(x: width * 0.82, y: height * 0.12)
+                LinearGradient(colors: [.clear, .black.opacity(0.40)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .clipped()
+        }
+    }
+}
+
 struct MovieBackdrop: View {
     let movie: Movie
     var usePosterFallback = false
@@ -49,11 +75,7 @@ struct MovieBackdrop: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                LinearGradient(
-                    colors: CinemaTheme.artworkColors(for: movie.title),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                ArtworkFallback(title: movie.title)
                 Image(systemName: "film.stack")
                     .font(.system(size: 120, weight: .ultraLight))
                     .foregroundStyle(.white.opacity(0.08))

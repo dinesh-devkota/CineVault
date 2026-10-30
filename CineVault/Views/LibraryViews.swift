@@ -109,7 +109,8 @@ struct HomeView: View {
             .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
     }
     private var featured: Movie? {
-        available.first { $0.backdropPath != nil } ?? available.first
+        let unwatched = available.filter { !$0.isInProgress && !$0.isWatched }
+        return unwatched.first { $0.backdropPath != nil } ?? unwatched.first ?? available.first
     }
 
     var body: some View {
@@ -351,6 +352,7 @@ struct ContinueWatchingCard: View {
                 }
             Text(movie.title)
                 .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
                 .lineLimit(1)
             Text(movie.displayYear.isEmpty ? "Continue watching" : movie.displayYear)
                 .font(.system(size: 20))
@@ -369,8 +371,7 @@ struct PosterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack {
-                LinearGradient(colors: CinemaTheme.artworkColors(for: movie.title),
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                ArtworkFallback(title: movie.title)
                 VStack(spacing: 18) {
                     Image(systemName: "film")
                         .font(.system(size: 55, weight: .ultraLight))
@@ -414,6 +415,7 @@ struct PosterView: View {
 
             Text(movie.title)
                 .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(.white)
                 .lineLimit(1)
             Text(movie.displayYear.isEmpty ? "Movie" : movie.displayYear)
                 .font(.system(size: 19))

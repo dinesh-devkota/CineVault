@@ -6,9 +6,11 @@ import SwiftUI
 /// An in-memory sample library for visual checks; never touches a real library or NAS.
 @MainActor
 struct DesignPreview: View {
-    static let isEnabled = ProcessInfo.processInfo.arguments.contains("--ui-preview")
+    static let isDetail = ProcessInfo.processInfo.arguments.contains("--ui-preview-detail")
+    static let isEnabled = isDetail || ProcessInfo.processInfo.arguments.contains("--ui-preview")
 
     private let container: ModelContainer
+    private let featuredMovie: Movie
 
     init() {
         do {
@@ -27,6 +29,7 @@ struct DesignPreview: View {
                 ("Ocean Light", 2023, "Documentary", "A voyage across the water, from first light to the last sunset."),
                 ("The Last Signal", 2019, "Thriller", "A mysterious message changes the course of an ordinary night."),
             ]
+            var featuredMovie: Movie?
             for (index, sample) in samples.enumerated() {
                 let movie = Movie(filePath: "Movies/\(sample.title).mp4",
                                   fileSize: Int64(index + 2) * 1_000_000_000,
@@ -40,22 +43,38 @@ struct DesignPreview: View {
                 movie.runtimeMinutes = 105 + index * 3
                 movie.rating = 7.8
                 movie.dateAdded = Date().addingTimeInterval(-Double(index) * 86_400)
-                if index == 0 {
-                    movie.playbackPosition = 1_800
+                if index < 4 {
+                    movie.playbackPosition = Double(1_800 + index * 480)
                     movie.duration = 6_300
-                    movie.lastPlayedAt = Date()
+                    movie.lastPlayedAt = Date().addingTimeInterval(-Double(index) * 3_600)
                 }
+                if index == 0 { featuredMovie = movie }
                 context.insert(movie)
             }
             try context.save()
+            guard let featuredMovie else {
+                fatalError("The design preview library is empty.")
+            }
             self.container = container
+            self.featuredMovie = featuredMovie
         } catch {
             fatalError("Unable to create the in-memory design preview: \(error)")
         }
     }
 
     var body: some View {
-        RootView().modelContainer(container)
+        Group {
+            if Self.isDetail {
+                NavigationStack {
+                    MovieDetailView(movie: featuredMovie)
+                }
+                .tint(CinemaTheme.accent)
+                .preferredColorScheme(.dark)
+            } else {
+                RootView()
+            }
+        }
+        .modelContainer(container)
     }
 }
 #endif

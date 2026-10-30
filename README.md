@@ -28,7 +28,7 @@ tvOS' built-in player plays **MP4 / M4V / MOV** (H.264, HEVC, AAC, AC3/E-AC3). M
 | `Packages/CineVaultCore/` | Pure Swift logic (filename parser, file filter, TMDB models, title matcher) + unit tests |
 | `scripts/generate_app_icons.py` | Generates the layered tvOS icons / top-shelf images (stdlib only) |
 | `.github/workflows/ci.yml` | Core tests + unsigned tvOS build on every push/PR |
-| `.github/workflows/ui-preview.yml` | On-demand Apple TV simulator screenshot with a sample library |
+| `.github/workflows/ui-preview.yml` | On-demand Apple TV simulator screenshots with a sample library |
 | `.github/workflows/testflight.yml` | Signed build + TestFlight upload (manual or `v*` tag) |
 | `fastlane/Fastfile` | `beta` lane used by the TestFlight workflow |
 
@@ -42,8 +42,9 @@ Everything builds on GitHub's macOS runners:
 2. Run **TestFlight** (Actions → TestFlight → Run workflow, or push a tag like `v1.0.0`) → signed build is uploaded to App Store Connect.
 
 For a visual check without a Mac, run **UI preview** from the Actions tab and download the
-`cinevault-ui-preview` artifact. It uses a temporary in-memory sample library and never
-connects to a NAS or changes your real collection.
+`cinevault-ui-preview` artifact. It captures the home and movie detail screens using an
+in-memory sample library with placeholder artwork; it never connects to a NAS or changes
+your real collection.
 
 On a Mac you can also do it locally: `brew install xcodegen && python3 scripts/generate_app_icons.py && xcodegen generate && open CineVault.xcodeproj`.
 
