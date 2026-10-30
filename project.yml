@@ -45,8 +45,22 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSAllowsArbitraryLoadsForMedia: true
+  CineVaultTests:
+    type: bundle.unit-test
+    platform: tvOS
+    sources:
+      - path: CineVaultTests
+    dependencies:
+      - target: CineVault
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   CineVault:
     build:
       targets:
         CineVault: all
+        CineVaultTests: [test]
+    test:
+      targets:
+        - CineVaultTests

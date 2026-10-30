@@ -40,6 +40,7 @@ Apple TV simulator previews with a sample library and placeholder artwork:
 | `Packages/CineVaultCore/` | Pure Swift logic (filename parser, file filter, TMDB models, title matcher) + unit tests |
 | `scripts/generate_app_icons.py` | Generates the layered tvOS icons / top-shelf images (stdlib only) |
 | `.github/workflows/ci.yml` | Core tests + unsigned tvOS build on every push/PR |
+| `.github/workflows/nas-integration.yml` | Simulator tests against a temporary local SMB fixture |
 | `.github/workflows/ui-preview.yml` | On-demand Apple TV simulator screenshots with a sample library |
 | `.github/workflows/testflight.yml` | Signed build + TestFlight upload (manual or `v*` tag) |
 | `fastlane/Fastfile` | `beta` lane used by the TestFlight workflow |
@@ -114,5 +115,9 @@ Tip: naming folders `Title (Year)/Title (Year).mp4` gives the best matches; add 
 ```bash
 cd Packages/CineVaultCore && swift test
 ```
+
+The **NAS integration** workflow also checks authenticated SMB scanning and byte-range
+reads on an Apple TV simulator. It creates a temporary local test share with sample data;
+it does not connect to your NAS.
 
 *This product uses the TMDB API but is not endorsed or certified by TMDB.*
