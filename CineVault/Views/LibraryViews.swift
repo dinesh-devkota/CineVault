@@ -43,35 +43,59 @@ struct LibraryView: View {
     }
 
     private var visible: [Movie] {
-        sort.sorted(movies.filter { !$0.isMissing && filter.matches($0) && (genre == nil || $0.genres.contains(genre!)) })
+        sort.sorted(movies.filter { movie in
+            !movie.isMissing && filter.matches(movie) && (genre.map { movie.genres.contains($0) } ?? true)
+        })
     }
 
     var body: some View {
         ScrollView {
-            HStack(spacing: 30) {
-                Picker("Sort", selection: $sort) {
-                    ForEach(LibrarySort.allCases) { Text($0.rawValue).tag($0) }
+            VStack(alignment: .leading, spacing: 32) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("YOUR COLLECTION")
+                            .font(.system(size: 18, weight: .semibold))
+                            .tracking(3)
+                            .foregroundStyle(CinemaTheme.accent)
+                        Text("Movies").font(.system(size: 62, weight: .bold))
+                    }
+                    Spacer()
+                    Text("\(visible.count) titles")
+                        .font(.callout)
+                        .foregroundStyle(CinemaTheme.secondaryText)
                 }
-                Picker("Show", selection: $filter) {
-                    ForEach(LibraryFilter.allCases) { Text($0.rawValue).tag($0) }
+
+                HStack(spacing: 24) {
+                    Picker("Sort", selection: $sort) {
+                        ForEach(LibrarySort.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Picker("Show", selection: $filter) {
+                        ForEach(LibraryFilter.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Picker("Genre", selection: $genre) {
+                        Text("All Genres").tag(String?.none)
+                        ForEach(genres, id: \.self) { Text($0).tag(String?.some($0)) }
+                    }
+                    Spacer()
                 }
-                Picker("Genre", selection: $genre) {
-                    Text("All Genres").tag(String?.none)
-                    ForEach(genres, id: \.self) { Text($0).tag(String?.some($0)) }
+                .pickerStyle(.menu)
+
+                if movies.isEmpty {
+                    ContentUnavailableView("No movies yet", systemImage: "film",
+                                           description: Text("Add your NAS in the Sources tab."))
+                        .padding(.top, 100)
+                } else if visible.isEmpty {
+                    ContentUnavailableView("No matching movies", systemImage: "line.3.horizontal.decrease.circle",
+                                           description: Text("Try another filter or genre."))
+                        .padding(.top, 100)
+                } else {
+                    PosterGrid(movies: visible)
                 }
-                Spacer()
-                Text("\(visible.count) movies").foregroundStyle(.secondary)
             }
-            .pickerStyle(.menu)
-            .padding(.bottom, 30)
-            PosterGrid(movies: visible)
+            .padding(.horizontal, 70)
+            .padding(.bottom, 100)
         }
-        .overlay {
-            if movies.isEmpty {
-                ContentUnavailableView("No movies yet", systemImage: "film",
-                                       description: Text("Add your NAS in the Sources tab."))
-            }
-        }
+        .background(CinemaBackground())
     }
 }
 
@@ -80,26 +104,52 @@ struct HomeView: View {
     @EnvironmentObject private var scanner: LibraryScanner
 
     private var available: [Movie] { movies.filter { !$0.isHidden && !$0.isMissing } }
+    private var continuing: [Movie] {
+        available.filter(\.isInProgress)
+            .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+    }
+    private var featured: Movie? {
+        available.first { $0.backdropPath != nil } ?? available.first
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 50) {
-                if let status = scanner.status {
-                    Text(status).font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 48) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("YOUR PERSONAL CINEMA")
+                            .font(.system(size: 18, weight: .semibold))
+                            .tracking(3)
+                            .foregroundStyle(CinemaTheme.accent)
+                        Text("Welcome to CineVault")
+                            .font(.system(size: 54, weight: .bold))
+                    }
+                    Spacer()
+                    if let status = scanner.status {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(CinemaTheme.secondaryText)
+                            .lineLimit(1)
+                    }
                 }
-                let continuing = available.filter(\.isInProgress)
-                    .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
-                PosterRow(title: "Continue Watching", movies: Array(continuing.prefix(20)))
-                PosterRow(title: "Recently Added", movies: Array(available.prefix(20)))
-                PosterRow(title: "Unwatched", movies: Array(available.filter { !$0.isWatched }.shuffled().prefix(20)))
+
+                if available.isEmpty {
+                    ContentUnavailableView("Your movie collection starts here", systemImage: "play.rectangle.on.rectangle",
+                                           description: Text("Add a NAS source, then add a TMDB key for artwork and details."))
+                        .padding(.top, 100)
+                } else {
+                    ContinueWatchingRow(movies: Array(continuing.prefix(20)))
+                    if let featured {
+                        FeaturedMovieCard(movie: featured)
+                    }
+                    PosterRow(title: "Recently Added", movies: Array(available.prefix(20)))
+                    PosterRow(title: "Unwatched", movies: Array(available.filter { !$0.isWatched }.prefix(20)))
+                }
             }
+            .padding(.horizontal, 70)
+            .padding(.bottom, 100)
         }
-        .overlay {
-            if movies.isEmpty {
-                ContentUnavailableView("Welcome to CineVault", systemImage: "play.rectangle.on.rectangle",
-                                       description: Text("Add a NAS share in Sources, and a TMDB key in Settings for posters."))
-            }
-        }
+        .background(CinemaBackground())
     }
 }
 
@@ -108,10 +158,10 @@ struct SearchView: View {
     @State private var text = ""
 
     private var results: [Movie] {
-        guard !text.isEmpty else { return [] }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let needle = TitleMatcher.normalize(text)
         return movies.filter { movie in
-            !movie.isMissing && (TitleMatcher.normalize(movie.title).contains(needle)
+            !movie.isMissing && ((!needle.isEmpty && TitleMatcher.normalize(movie.title).contains(needle))
                 || movie.genres.contains { $0.localizedCaseInsensitiveContains(text) }
                 || movie.fileName.localizedCaseInsensitiveContains(text))
         }
@@ -119,76 +169,258 @@ struct SearchView: View {
     }
 
     var body: some View {
-        ScrollView { PosterGrid(movies: results) }
-            .searchable(text: $text, prompt: "Titles, genres, files")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                Text("Search").font(.system(size: 62, weight: .bold))
+                if text.isEmpty {
+                    ContentUnavailableView("Search your collection", systemImage: "magnifyingglass",
+                                           description: Text("Find a movie by title, genre or file name."))
+                        .padding(.top, 100)
+                } else if results.isEmpty {
+                    ContentUnavailableView("No results", systemImage: "magnifyingglass",
+                                           description: Text("Try a different search."))
+                        .padding(.top, 100)
+                } else {
+                    Text("\(results.count) results")
+                        .foregroundStyle(CinemaTheme.secondaryText)
+                    PosterGrid(movies: results)
+                }
+            }
+            .padding(.horizontal, 70)
+            .padding(.bottom, 100)
+        }
+        .background(CinemaBackground())
+        .searchable(text: $text, prompt: "Titles, genres, files")
     }
 }
 
 struct PosterGrid: View {
     let movies: [Movie]
-    private let columns = [GridItem(.adaptive(minimum: 260, maximum: 260), spacing: 50)]
+    @FocusState private var focusedMovie: UUID?
+    private let columns = [GridItem(.adaptive(minimum: CinemaTheme.posterWidth, maximum: CinemaTheme.posterWidth), spacing: 48)]
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 60) {
+        LazyVGrid(columns: columns, spacing: 55) {
             ForEach(movies) { movie in
-                NavigationLink(value: movie) { PosterView(movie: movie) }
-                    .buttonStyle(.borderless)
+                NavigationLink(value: movie) {
+                    PosterView(movie: movie, isFocused: focusedMovie == movie.id)
+                }
+                .buttonStyle(.plain)
+                .focused($focusedMovie, equals: movie.id)
             }
         }
+        .padding(.vertical, 24)
     }
 }
 
 struct PosterRow: View {
     let title: String
     let movies: [Movie]
+    @FocusState private var focusedMovie: UUID?
 
     var body: some View {
         if !movies.isEmpty {
-            VStack(alignment: .leading) {
-                Text(title).font(.headline)
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 50) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 32, weight: .semibold))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 42) {
                         ForEach(movies) { movie in
-                            NavigationLink(value: movie) { PosterView(movie: movie) }
-                                .buttonStyle(.borderless)
+                            NavigationLink(value: movie) {
+                                PosterView(movie: movie, isFocused: focusedMovie == movie.id)
+                            }
+                            .buttonStyle(.plain)
+                            .focused($focusedMovie, equals: movie.id)
                         }
                     }
-                    .padding(.vertical, 30)
+                    .padding(.vertical, 24)
                 }
                 .scrollClipDisabled()
             }
+        }
+    }
+}
+
+struct FeaturedMovieCard: View {
+    let movie: Movie
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                MovieBackdrop(movie: movie)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                LinearGradient(
+                    stops: [
+                        .init(color: .black.opacity(0.95), location: 0),
+                        .init(color: .black.opacity(0.75), location: 0.35),
+                        .init(color: .black.opacity(0.10), location: 1),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                LinearGradient(colors: [.clear, .black.opacity(0.5)],
+                               startPoint: .top, endPoint: .bottom)
+
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("FEATURED MOVIE")
+                        .font(.system(size: 18, weight: .semibold))
+                        .tracking(3)
+                        .foregroundStyle(CinemaTheme.accent)
+                    Text(movie.title)
+                        .font(.system(size: 52, weight: .bold))
+                        .lineLimit(2)
+                    Text(MoviePresentation.metadata(for: movie))
+                        .font(.callout)
+                        .foregroundStyle(CinemaTheme.secondaryText)
+                    if let overview = movie.overview, !overview.isEmpty {
+                        Text(overview)
+                            .font(.callout)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(2)
+                    }
+                    NavigationLink(value: movie) {
+                        Label("View Movie", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white)
+                    .foregroundStyle(.black)
+                    .padding(.top, 8)
+                }
+                .frame(maxWidth: 720, alignment: .leading)
+                .padding(48)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+            }
+        }
+        .frame(height: 500)
+    }
+}
+
+struct ContinueWatchingRow: View {
+    let movies: [Movie]
+    @FocusState private var focusedMovie: UUID?
+
+    var body: some View {
+        if !movies.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Continue Watching").font(.system(size: 32, weight: .semibold))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 36) {
+                        ForEach(movies) { movie in
+                            NavigationLink(value: movie) {
+                                ContinueWatchingCard(movie: movie, isFocused: focusedMovie == movie.id)
+                            }
+                            .buttonStyle(.plain)
+                            .focused($focusedMovie, equals: movie.id)
+                        }
+                    }
+                    .padding(.vertical, 24)
+                }
+                .scrollClipDisabled()
+            }
+        }
+    }
+}
+
+struct ContinueWatchingCard: View {
+    let movie: Movie
+    let isFocused: Bool
+    private let width: CGFloat = 400
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MovieBackdrop(movie: movie, usePosterFallback: true)
+                .frame(width: width, height: 225)
+                .overlay(alignment: .bottom) {
+                    LinearGradient(colors: [.clear, .black.opacity(0.75)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 90)
+                }
+                .overlay(alignment: .bottom) {
+                    ProgressView(value: movie.progress)
+                        .tint(CinemaTheme.accent)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 12)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(.white.opacity(isFocused ? 0.9 : 0.10), lineWidth: isFocused ? 3 : 1)
+                }
+            Text(movie.title)
+                .font(.system(size: 24, weight: .semibold))
+                .lineLimit(1)
+            Text(movie.displayYear.isEmpty ? "Continue watching" : movie.displayYear)
+                .font(.system(size: 20))
+                .foregroundStyle(CinemaTheme.secondaryText)
+        }
+        .frame(width: width, alignment: .leading)
+        .scaleEffect(isFocused ? 1.04 : 1)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 
 struct PosterView: View {
     let movie: Movie
+    var isFocused = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            AsyncImage(url: TMDB.imageURL(movie.posterPath, size: "w342")) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                ZStack {
-                    LinearGradient(colors: [.indigo, .black], startPoint: .top, endPoint: .bottom)
-                    Text(movie.title).font(.headline).multilineTextAlignment(.center).padding()
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack {
+                LinearGradient(colors: [Color(red: 0.18, green: 0.25, blue: 0.29), CinemaTheme.background],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                VStack(spacing: 18) {
+                    Image(systemName: "film")
+                        .font(.system(size: 55, weight: .ultraLight))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text(movie.title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .padding(.horizontal, 18)
+                }
+                AsyncImage(url: TMDB.imageURL(movie.posterPath, size: "w342")) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.clear
                 }
             }
-            .frame(width: 260, height: 390)
+            .frame(width: CinemaTheme.posterWidth, height: CinemaTheme.posterHeight)
             .clipped()
             .overlay(alignment: .bottom) {
                 if movie.isInProgress {
-                    ProgressView(value: movie.progress).tint(.orange).padding(8)
+                    ProgressView(value: movie.progress)
+                        .tint(CinemaTheme.accent)
+                        .padding(10)
+                        .background(.black.opacity(0.45))
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if movie.isWatched {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.white, .green).padding(8)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.white)
+                        .padding(10)
                 }
             }
-            Text(movie.title).font(.caption).lineLimit(1)
-            Text(movie.displayYear).font(.caption2).foregroundStyle(.secondary)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(.white.opacity(isFocused ? 0.9 : 0.10), lineWidth: isFocused ? 3 : 1)
+            }
+            .shadow(color: .black.opacity(isFocused ? 0.6 : 0.25), radius: isFocused ? 20 : 8, y: 10)
+
+            Text(movie.title)
+                .font(.system(size: 23, weight: .semibold))
+                .lineLimit(1)
+            Text(movie.displayYear.isEmpty ? "Movie" : movie.displayYear)
+                .font(.system(size: 19))
+                .foregroundStyle(CinemaTheme.secondaryText)
         }
-        .frame(width: 260)
+        .frame(width: CinemaTheme.posterWidth, alignment: .leading)
+        .scaleEffect(isFocused ? 1.04 : 1)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }

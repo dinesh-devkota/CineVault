@@ -9,46 +9,60 @@ struct MovieDetailView: View {
     @State private var unsupported = false
 
     var body: some View {
-        ZStack {
-            AsyncImage(url: TMDB.imageURL(movie.backdropPath, size: "w1280")) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: { Color.black }
+        ZStack(alignment: .topLeading) {
+            MovieBackdrop(movie: movie)
+                .ignoresSafeArea()
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.95), location: 0),
+                    .init(color: .black.opacity(0.83), location: 0.35),
+                    .init(color: .black.opacity(0.18), location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
             .ignoresSafeArea()
-            .overlay(LinearGradient(colors: [.black.opacity(0.95), .black.opacity(0.4)], startPoint: .leading, endPoint: .trailing).ignoresSafeArea())
+            LinearGradient(colors: [.black.opacity(0.18), .clear, CinemaTheme.background],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
-            HStack(alignment: .top, spacing: 60) {
-                PosterView(movie: movie)
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(movie.title).font(.largeTitle).bold()
-                    Text(subtitle).foregroundStyle(.secondary)
-                    if let tagline = movie.tagline, !tagline.isEmpty { Text(tagline).italic() }
-                    if let overview = movie.overview {
-                        Text(overview).lineLimit(6).font(.callout)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("CINEVAULT  /  MOVIE")
+                        .font(.system(size: 18, weight: .semibold))
+                        .tracking(3)
+                        .foregroundStyle(CinemaTheme.accent)
+                    Text(movie.title)
+                        .font(.system(size: 72, weight: .bold))
+                        .lineLimit(2)
+                    Text(MoviePresentation.metadata(for: movie))
+                        .font(.title3)
+                        .foregroundStyle(CinemaTheme.secondaryText)
+
+                    if let tagline = movie.tagline, !tagline.isEmpty {
+                        Text(tagline)
+                            .font(.title3)
+                            .italic()
+                            .foregroundStyle(.white.opacity(0.85))
                     }
-                    HStack(spacing: 30) {
-                        if movie.isInProgress {
-                            Button { play(resume: true) } label: {
-                                Label("Resume \(format(movie.playbackPosition))", systemImage: "play.fill")
-                            }
-                        }
-                        Button { play(resume: false) } label: {
-                            Label(movie.isInProgress ? "Play from Start" : "Play", systemImage: "play.fill")
-                        }
-                        Button {
-                            movie.isWatched.toggle()
-                            movie.playbackPosition = 0
-                        } label: {
-                            Label(movie.isWatched ? "Mark Unwatched" : "Mark Watched",
-                                  systemImage: movie.isWatched ? "eye.slash" : "checkmark")
-                        }
-                        Button { editing = true } label: { Label("Edit", systemImage: "pencil") }
+                    if let overview = movie.overview, !overview.isEmpty {
+                        Text(overview)
+                            .font(.callout)
+                            .foregroundStyle(.white.opacity(0.90))
+                            .lineLimit(5)
+                            .frame(maxWidth: 820, alignment: .leading)
                     }
-                    .padding(.top, 20)
-                    Text(movie.filePath).font(.caption2).foregroundStyle(.tertiary)
+
+                    playbackControls
+                        .padding(.top, 16)
+                    fileDetails
+                        .padding(.top, 24)
                 }
-                Spacer()
+                .padding(.horizontal, 90)
+                .padding(.top, 90)
+                .padding(.bottom, 100)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(80)
         }
         .sheet(isPresented: $editing) { NavigationStack { EditMovieView(movie: movie) } }
         .fullScreenCover(item: $playback) { controller in
@@ -63,14 +77,67 @@ struct MovieDetailView: View {
         }
     }
 
-    private var subtitle: String {
-        var parts: [String] = []
-        if let year = movie.year { parts.append(String(year)) }
-        if let runtime = movie.runtimeMinutes, runtime > 0 { parts.append("\(runtime / 60)h \(runtime % 60)m") }
-        if let rating = movie.rating, rating > 0 { parts.append(String(format: "★ %.1f", rating)) }
-        if !movie.genres.isEmpty { parts.append(movie.genres.joined(separator: ", ")) }
-        parts.append(ByteCountFormatter.string(fromByteCount: movie.fileSize, countStyle: .file))
-        return parts.joined(separator: " · ")
+    private var playbackControls: some View {
+        HStack(spacing: 24) {
+            if movie.isInProgress {
+                Button { play(resume: true) } label: {
+                    Label("Resume \(format(movie.playbackPosition))", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.white)
+                .foregroundStyle(.black)
+
+                Button { play(resume: false) } label: {
+                    Label("Start Over", systemImage: "backward.end.fill")
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button { play(resume: false) } label: {
+                    Label("Play", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.white)
+                .foregroundStyle(.black)
+            }
+            Button {
+                movie.isWatched.toggle()
+                movie.playbackPosition = 0
+            } label: {
+                Label(movie.isWatched ? "Mark Unwatched" : "Mark Watched",
+                      systemImage: movie.isWatched ? "eye.slash" : "checkmark")
+            }
+            .buttonStyle(.bordered)
+            Button { editing = true } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var fileDetails: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("IN YOUR LIBRARY")
+                .font(.system(size: 17, weight: .semibold))
+                .tracking(2)
+                .foregroundStyle(CinemaTheme.secondaryText)
+            HStack(spacing: 20) {
+                if let source = movie.source {
+                    Label(source.name, systemImage: "externaldrive")
+                }
+                Text(ByteCountFormatter.string(fromByteCount: movie.fileSize, countStyle: .file))
+                if movie.isWatched {
+                    Label("Watched", systemImage: "checkmark.circle.fill")
+                }
+                if movie.isHidden {
+                    Label("Hidden", systemImage: "eye.slash")
+                }
+            }
+            .font(.caption)
+            Text(movie.filePath)
+                .font(.caption2)
+                .foregroundStyle(CinemaTheme.secondaryText)
+                .lineLimit(2)
+        }
     }
 
     private func format(_ seconds: Double) -> String {

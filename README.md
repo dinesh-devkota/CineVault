@@ -8,6 +8,7 @@ A Plex-style movie library for **Apple TV** that reads your movies **directly fr
 - Recursive scan for movie files; skips samples, trailers, extras and NAS metadata folders (`@eaDir`, `#recycle`, …).
 - Smart filename parsing (`The.Matrix.1999.1080p.BluRay.x264-GRP.mkv` → *The Matrix (1999)*), folder fallback (`Heat (1995)/movie.mkv`) and `{tmdb-123}` tags.
 - Posters, backdrops, overview, genres, runtime and rating from TMDB (your own free API key).
+- Cinematic Apple TV browsing with backdrop artwork, landscape Continue Watching cards, focus-aware posters, a movie detail screen, and a dark, uncluttered interface.
 - Home (Continue Watching / Recently Added / Unwatched), full library grid with sort + filter + genre, and search.
 - Streaming playback with AVPlayer via a custom resource loader that serves byte ranges straight from SMB — instant start and seeking, nothing is downloaded first.
 - Resume position, watched state (auto at 92%), progress bars.

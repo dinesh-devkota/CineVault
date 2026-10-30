@@ -26,6 +26,8 @@ struct RootView: View {
             NavigationStack { SourcesView() }.tabItem { Text("Sources") }
             NavigationStack { SettingsView() }.tabItem { Image(systemName: "gearshape") }
         }
+        .tint(CinemaTheme.accent)
+        .preferredColorScheme(.dark)
         .task { await scanner.scanAll(context: context) }
     }
 }
