@@ -57,14 +57,14 @@ final class SMBIntegrationTests: XCTestCase {
         let source = MediaSource(name: "Fixture", host: config.host, port: config.port, share: config.share,
                                  rootPath: config.rootPath, username: config.username)
         source.id = config.id
-        try source.setPassword(config.password)
         let staleMovie = Movie(filePath: movie.path, fileSize: 1, source: source)
-        let controller = try XCTUnwrap(PlaybackController(movie: staleMovie, resume: false, services: PlaybackServices()))
+        let controller = try XCTUnwrap(PlaybackController(
+            movie: staleMovie, resume: false, services: PlaybackServices(), sourceConfig: { _ in config }
+        ))
         let player = controller.player
         defer {
             controller.stop()
             player.replaceCurrentItem(with: nil)
-            try? Keychain.delete("source-\(config.id.uuidString)")
         }
 
         player.play()
@@ -149,6 +149,40 @@ final class SMBIntegrationTests: XCTestCase {
         XCTAssertEqual(bytes, Data("3456".utf8))
         let attempts = await gate.attempts
         XCTAssertEqual(attempts, 1, "The concurrent read should not need to reconnect.")
+        await service.reset(config)
+    }
+
+    @MainActor
+    func testResetDuringConnectionDoesNotRestoreStaleManager() async throws {
+        let config = configuration()
+        let gate = ReadGate()
+        let connected = expectation(description: "Connection has completed but is not cached")
+        let service = SMBService(timeout: 3) { manager, share in
+            try await manager.connectShare(name: share)
+            if await gate.nextAttempt() == 1 {
+                connected.fulfill()
+                await gate.wait()
+            }
+        }
+        let first = Task {
+            try await service.fileSize(config, path: "Movies/Feature (2020)/bytes.bin")
+        }
+        defer { Task { await gate.release() } }
+        await fulfillment(of: [connected], timeout: 15)
+
+        await service.reset(sourceID: config.id)
+        await gate.release()
+        do {
+            _ = try await first.value
+            XCTFail("A connection invalidated by a source reset must not be cached.")
+        } catch {
+            XCTAssertEqual(error as? SMBError, .sourceChanged)
+        }
+
+        let size = try await service.fileSize(config, path: "Movies/Feature (2020)/bytes.bin")
+        XCTAssertEqual(size, 10)
+        let attempts = await gate.attempts
+        XCTAssertEqual(attempts, 2, "The next request must establish a new connection.")
         await service.reset(config)
     }
 

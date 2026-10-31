@@ -113,10 +113,11 @@ final class PlaybackController: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
 
-    init?(movie: Movie, resume: Bool, services: PlaybackServices) throws {
+    init?(movie: Movie, resume: Bool, services: PlaybackServices,
+          sourceConfig: (MediaSource) throws -> SourceConfig = { try $0.config() }) throws {
         guard let source = movie.source else { return nil }
         self.movie = movie
-        loader = SMBResourceLoader(config: try source.config(), path: movie.filePath)
+        loader = SMBResourceLoader(config: try sourceConfig(source), path: movie.filePath)
         let item = AVPlayerItem(asset: loader.makeAsset())
         item.externalMetadata = Self.metadata(for: movie)
         let player = AVPlayer(playerItem: item)

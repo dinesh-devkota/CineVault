@@ -10,12 +10,14 @@ struct RemoteFile: Sendable {
 enum SMBError: LocalizedError, Equatable {
     case invalidServer
     case invalidFileSize
+    case sourceChanged
     case unexpectedEndOfFile
 
     var errorDescription: String? {
         switch self {
         case .invalidServer: return "Invalid server address."
         case .invalidFileSize: return "The NAS file is empty or its size could not be read."
+        case .sourceChanged: return "The NAS source changed while connecting. Retry."
         case .unexpectedEndOfFile: return "The NAS file ended unexpectedly. Rescan the source and retry."
         }
     }
@@ -26,32 +28,44 @@ actor SMBService {
     static let shared = SMBService()
 
     private let timeout: TimeInterval?
+    private let connect: (SMB2Manager, String) async throws -> Void
     private var managers: [SourceConfig: SMB2Manager] = [:]
+    private var generations: [UUID: UInt64] = [:]
 
-    init(timeout: TimeInterval? = nil) {
+    init(timeout: TimeInterval? = nil,
+         connect: @escaping (SMB2Manager, String) async throws -> Void = { manager, share in
+             try await manager.connectShare(name: share)
+         }) {
         self.timeout = timeout
+        self.connect = connect
     }
 
     private func manager(for config: SourceConfig) async throws -> SMB2Manager {
         if let existing = managers[config] { return existing }
+        let generation = generations[config.id, default: 0]
         let credential = config.username.isEmpty ? nil
             : URLCredential(user: config.username, password: config.password, persistence: .forSession)
         guard let url = config.serverURL, let manager = SMB2Manager(url: url, credential: credential) else {
             throw SMBError.invalidServer
         }
         if let timeout { manager.timeout = timeout }
-        try await manager.connectShare(name: config.share)
+        try await connect(manager, config.share)
+        try Task.checkCancellation()
+        guard generations[config.id, default: 0] == generation else { throw SMBError.sourceChanged }
+        if let existing = managers[config] { return existing }
         managers[config] = manager
         return manager
     }
 
     func reset(_ config: SourceConfig) async {
+        generations[config.id, default: 0] &+= 1
         if let manager = managers.removeValue(forKey: config) {
             try? await manager.disconnectShare(gracefully: false)
         }
     }
 
     func reset(sourceID: UUID) async {
+        generations[sourceID, default: 0] &+= 1
         let stale = managers.filter { $0.key.id == sourceID }
         for config in stale.keys { managers.removeValue(forKey: config) }
         for manager in stale.values { try? await manager.disconnectShare(gracefully: false) }
@@ -67,6 +81,8 @@ actor SMBService {
             return try await body(manager)
         } catch is CancellationError {
             throw CancellationError()
+        } catch SMBError.sourceChanged {
+            throw SMBError.sourceChanged
         } catch {
             try Task.checkCancellation()
             if let usedManager, managers[config] === usedManager {
