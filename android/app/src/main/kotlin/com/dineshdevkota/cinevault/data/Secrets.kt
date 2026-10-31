@@ -5,6 +5,8 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.content.edit
+import com.dineshdevkota.cinevault.core.LibraryFilter
+import com.dineshdevkota.cinevault.core.LibrarySort
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -68,7 +70,20 @@ class Settings(context: Context, private val secrets: SecretBox) {
 
     val hasTmdbKey: Boolean get() = tmdbApiKey.isNotEmpty()
 
+    var librarySort: LibrarySort
+        get() = enumValue(SORT_KEY, LibrarySort.TITLE)
+        set(value) = prefs.edit { putString(SORT_KEY, value.name) }
+
+    var libraryFilter: LibraryFilter
+        get() = enumValue(FILTER_KEY, LibraryFilter.ALL)
+        set(value) = prefs.edit { putString(FILTER_KEY, value.name) }
+
+    private inline fun <reified T : Enum<T>> enumValue(key: String, default: T): T =
+        prefs.getString(key, null)?.let { name -> enumValues<T>().firstOrNull { it.name == name } } ?: default
+
     private companion object {
         const val TMDB_KEY = "tmdb_api_key"
+        const val SORT_KEY = "library_sort"
+        const val FILTER_KEY = "library_filter"
     }
 }

@@ -135,7 +135,8 @@ class SmbService(
     }
 
     /** Closes cached sessions for a source after it is edited or deleted. */
-    fun reset(sourceId: String) {
+    /** Drops cached sessions for a source; closing them talks to the NAS, so it runs on IO. */
+    suspend fun reset(sourceId: String) = withContext(Dispatchers.IO) {
         shares.keys.filter { it.id == sourceId }.forEach { key -> shares.remove(key)?.close() }
     }
 
