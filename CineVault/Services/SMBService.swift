@@ -9,11 +9,13 @@ struct RemoteFile: Sendable {
 
 enum SMBError: LocalizedError, Equatable {
     case invalidServer
+    case invalidFileSize
     case unexpectedEndOfFile
 
     var errorDescription: String? {
         switch self {
         case .invalidServer: return "Invalid server address."
+        case .invalidFileSize: return "The NAS file is empty or its size could not be read."
         case .unexpectedEndOfFile: return "The NAS file ended unexpectedly. Rescan the source and retry."
         }
     }
@@ -56,15 +58,21 @@ actor SMBService {
     }
 
     /// Retries once with a fresh connection (NAS may drop idle sessions).
-    private func withManager<T>(_ config: SourceConfig, _ body: (SMB2Manager) async throws -> T) async throws -> T {
+    func withManager<T>(_ config: SourceConfig, _ body: (SMB2Manager) async throws -> T) async throws -> T {
         try Task.checkCancellation()
+        var usedManager: SMB2Manager?
         do {
-            return try await body(try await manager(for: config))
+            let manager = try await manager(for: config)
+            usedManager = manager
+            return try await body(manager)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             try Task.checkCancellation()
-            await reset(config)
+            if let usedManager, managers[config] === usedManager {
+                // Other reads may still be using this connection.
+                managers.removeValue(forKey: config)
+            }
             try Task.checkCancellation()
             return try await body(try await manager(for: config))
         }
@@ -120,7 +128,10 @@ actor SMBService {
     func fileSize(_ config: SourceConfig, path: String) async throws -> Int64 {
         try await withManager(config) { manager in
             let attributes = try await manager.attributesOfItem(atPath: path)
-            return (attributes[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
+            guard let size = (attributes[.fileSizeKey] as? NSNumber)?.int64Value, size > 0 else {
+                throw SMBError.invalidFileSize
+            }
+            return size
         }
     }
 }

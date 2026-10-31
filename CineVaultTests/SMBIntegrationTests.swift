@@ -4,6 +4,32 @@ import XCTest
 @testable import CineVault
 
 final class SMBIntegrationTests: XCTestCase {
+    private actor ReadGate {
+        private(set) var attempts = 0
+        private var released = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func nextAttempt() -> Int {
+            attempts += 1
+            return attempts
+        }
+
+        func wait() async {
+            guard !released else { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func release() {
+            released = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    private enum ForcedFailure: Error {
+        case expected
+    }
+
     private func configuration(password: String = "fixture-only") -> SourceConfig {
         SourceConfig(id: UUID(), host: "127.0.0.1", port: 1445, share: "CINEVAULT",
                      rootPath: "Movies", username: "cinevault", password: password)
@@ -28,12 +54,17 @@ final class SMBIntegrationTests: XCTestCase {
         let config = configuration()
         let files = try await SMBService.shared.scanVideos(config)
         let movie = try XCTUnwrap(files.first)
-        let loader = SMBResourceLoader(config: config, path: movie.path, knownSize: movie.size)
-        let player = AVPlayer(playerItem: AVPlayerItem(asset: loader.makeAsset()))
+        let source = MediaSource(name: "Fixture", host: config.host, port: config.port, share: config.share,
+                                 rootPath: config.rootPath, username: config.username)
+        source.id = config.id
+        try source.setPassword(config.password)
+        let staleMovie = Movie(filePath: movie.path, fileSize: 1, source: source)
+        let controller = try XCTUnwrap(PlaybackController(movie: staleMovie, resume: false, services: PlaybackServices()))
+        let player = controller.player
         defer {
-            player.pause()
+            controller.stop()
             player.replaceCurrentItem(with: nil)
-            withExtendedLifetime(loader) {}
+            try? Keychain.delete("source-\(config.id.uuidString)")
         }
 
         player.play()
@@ -83,9 +114,47 @@ final class SMBIntegrationTests: XCTestCase {
         await SMBService.shared.reset(config)
     }
 
+    @MainActor
+    func testFailedOperationDoesNotDisconnectConcurrentRead() async throws {
+        let config = configuration()
+        let service = SMBService(timeout: 3)
+        let gate = ReadGate()
+        let readStarted = expectation(description: "Concurrent read has acquired the connection")
+        let read = Task {
+            try await service.withManager(config) { manager in
+                if await gate.nextAttempt() == 1 {
+                    readStarted.fulfill()
+                    await gate.wait()
+                }
+                return try await manager.contents(
+                    atPath: "Movies/Feature (2020)/bytes.bin",
+                    range: UInt64(3)..<UInt64(7), progress: nil
+                )
+            }
+        }
+        defer { Task { await gate.release() } }
+        await fulfillment(of: [readStarted], timeout: 15)
+
+        do {
+            let _: Void = try await service.withManager(config) { _ in
+                throw ForcedFailure.expected
+            }
+            XCTFail("The failing operation must report its error.")
+        } catch {
+            XCTAssertTrue(error is ForcedFailure)
+        }
+
+        await gate.release()
+        let bytes = try await read.value
+        XCTAssertEqual(bytes, Data("3456".utf8))
+        let attempts = await gate.attempts
+        XCTAssertEqual(attempts, 1, "The concurrent read should not need to reconnect.")
+        await service.reset(config)
+    }
+
     func testTruncatedRangeReportsUnexpectedEnd() async throws {
         let config = configuration()
-        let loader = SMBResourceLoader(config: config, path: "Movies/Feature (2020)/bytes.bin", knownSize: 12)
+        let loader = SMBResourceLoader(config: config, path: "Movies/Feature (2020)/bytes.bin")
         var received = Data()
         do {
             try await loader.streamBytes(from: 0, to: 12) { received.append($0) }

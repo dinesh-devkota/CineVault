@@ -14,14 +14,17 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
 
     private let config: SourceConfig
     private let path: String
-    private let knownSize: Int64
     private let queue = DispatchQueue(label: "cinevault.resource-loader")
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    private var sizeTask: Task<Int64, Error>?
 
-    init(config: SourceConfig, path: String, knownSize: Int64) {
+    init(config: SourceConfig, path: String) {
         self.config = config
         self.path = path
-        self.knownSize = knownSize
+    }
+
+    deinit {
+        sizeTask?.cancel()
     }
 
     func makeAsset() -> AVURLAsset {
@@ -37,8 +40,17 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader,
                         shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest) -> Bool {
         let key = ObjectIdentifier(loadingRequest)
+        let sizeTask: Task<Int64, Error>
+        if let existing = self.sizeTask {
+            sizeTask = existing
+        } else {
+            let config = self.config
+            let path = self.path
+            sizeTask = Task { try await SMBService.shared.fileSize(config, path: path) }
+            self.sizeTask = sizeTask
+        }
         tasks[key] = Task { [weak self] in
-            await self?.handle(loadingRequest)
+            await self?.handle(loadingRequest, sizeTask: sizeTask)
             self?.queue.async { self?.tasks.removeValue(forKey: key) }
         }
         return true
@@ -48,9 +60,10 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
         tasks.removeValue(forKey: ObjectIdentifier(loadingRequest))?.cancel()
     }
 
-    private func handle(_ request: AVAssetResourceLoadingRequest) async {
+    private func handle(_ request: AVAssetResourceLoadingRequest, sizeTask: Task<Int64, Error>) async {
         do {
-            let size = knownSize > 0 ? knownSize : try await SMBService.shared.fileSize(config, path: path)
+            let size = try await sizeTask.value
+            try Task.checkCancellation()
             if let info = request.contentInformationRequest {
                 info.contentType = VideoFile.contentType(path: path)
                 info.contentLength = size
@@ -103,7 +116,7 @@ final class PlaybackController: ObservableObject {
     init?(movie: Movie, resume: Bool, services: PlaybackServices) throws {
         guard let source = movie.source else { return nil }
         self.movie = movie
-        loader = SMBResourceLoader(config: try source.config(), path: movie.filePath, knownSize: movie.fileSize)
+        loader = SMBResourceLoader(config: try source.config(), path: movie.filePath)
         let item = AVPlayerItem(asset: loader.makeAsset())
         item.externalMetadata = Self.metadata(for: movie)
         let player = AVPlayer(playerItem: item)
