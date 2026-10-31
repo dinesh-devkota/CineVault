@@ -66,11 +66,18 @@ interface MovieDao {
     @Query("DELETE FROM movies WHERE sourceId = :sourceId")
     suspend fun deleteForSource(sourceId: String)
 
+    /** Saves a resume point; replaying a watched movie makes it in-progress again (tvOS parity). */
     @Query(
-        "UPDATE movies SET playbackPositionMs = :positionMs, durationMs = :durationMs, lastPlayedAt = :playedAt " +
-            "WHERE id = :id",
+        "UPDATE movies SET playbackPositionMs = :positionMs, isWatched = 0, lastPlayedAt = :playedAt, " +
+            "durationMs = CASE WHEN :durationMs > 0 THEN :durationMs ELSE durationMs END WHERE id = :id",
     )
     suspend fun saveProgress(id: String, positionMs: Long, durationMs: Long, playedAt: Long)
+
+    @Query(
+        "UPDATE movies SET isWatched = 1, playbackPositionMs = 0, lastPlayedAt = :playedAt, " +
+            "durationMs = CASE WHEN :durationMs > 0 THEN :durationMs ELSE durationMs END WHERE id = :id",
+    )
+    suspend fun markFinished(id: String, durationMs: Long, playedAt: Long)
 
     @Query("UPDATE movies SET isWatched = :watched, playbackPositionMs = 0 WHERE id = :id")
     suspend fun setWatched(id: String, watched: Boolean)

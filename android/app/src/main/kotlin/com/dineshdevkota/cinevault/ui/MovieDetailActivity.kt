@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.tv.material3.Button
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
@@ -44,6 +45,7 @@ import androidx.tv.material3.Text
 import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.core.Tmdb
 import com.dineshdevkota.cinevault.data.MovieEntity
+import com.dineshdevkota.cinevault.playback.PlayerActivity
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -139,6 +141,18 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                     Modifier.padding(top = 12.dp).focusRequester(actions),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    if (current.isInProgress) {
+                        Button(onClick = { PlayerActivity.start(context, current.id, resume = true) }) {
+                            Text("Resume ${formatDuration(current.playbackPositionMs)}")
+                        }
+                        OutlinedButton(onClick = { PlayerActivity.start(context, current.id, resume = false) }) {
+                            Text("Start Over")
+                        }
+                    } else {
+                        Button(onClick = { PlayerActivity.start(context, current.id, resume = false) }) {
+                            Text("Play")
+                        }
+                    }
                     OutlinedButton(onClick = { scope.launch { database.movies().setWatched(current.id, !current.isWatched) } }) {
                         Text(if (current.isWatched) "Mark Unwatched" else "Mark Watched")
                     }
