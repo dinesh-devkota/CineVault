@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cv_background">#FF0E0F13</color>
+    <color name="cv_accent">#FFE5A00D</color>
+
+    <style name="Theme.CineVault" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/cv_background</item>
+        <item name="android:colorAccent">@color/cv_accent</item>
+    </style>
+</resources>
