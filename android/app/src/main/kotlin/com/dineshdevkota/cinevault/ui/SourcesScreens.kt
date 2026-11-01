@@ -101,9 +101,13 @@ fun sourceUrl(source: SourceEntity): String =
 
 @Composable
 fun SettingsTab() {
-    val settings = LocalContext.current.container.settings
+    val container = LocalContext.current.container
+    val settings = container.settings
+    val metadata = container.metadata
     var apiKey by remember { mutableStateOf(settings.tmdbApiKey) }
     var message by remember { mutableStateOf<String?>(null) }
+    val fetching by metadata.isRunning.collectAsStateWithLifecycle()
+    val status by metadata.status.collectAsStateWithLifecycle()
 
     LazyColumn(
         contentPadding = PaddingValues(start = ScreenPadding, end = ScreenPadding, bottom = 48.dp),
@@ -122,17 +126,35 @@ fun SettingsTab() {
             )
         }
         item {
-            Button(onClick = {
-                settings.tmdbApiKey = apiKey
-                message = if (apiKey.isBlank()) "TMDB key removed." else "TMDB key saved."
-            }) {
-                Text("Save Key")
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Button(onClick = {
+                    settings.tmdbApiKey = apiKey
+                    metadata.clearStatus()
+                    if (apiKey.isBlank()) {
+                        message = "TMDB key removed."
+                    } else {
+                        message = "Fetching metadata…"
+                        container.scope.launch { metadata.fetchMissing() }
+                    }
+                }) {
+                    Text("Save Key & Fetch Missing Metadata")
+                }
+                OutlinedButton(
+                    onClick = {
+                        metadata.clearStatus()
+                        message = "Refreshing metadata…"
+                        container.scope.launch { metadata.refreshAll() }
+                    },
+                    enabled = !fetching,
+                ) {
+                    Text(if (fetching) "Updating Metadata…" else "Refresh All Metadata")
+                }
             }
         }
         item {
             Text(
-                message ?: "Get a free key at themoviedb.org → Settings → API. Posters and details are fetched " +
-                    "automatically after each scan.",
+                status ?: message ?: ("Get a free key at themoviedb.org → Settings → API. Posters and details are " +
+                    "fetched automatically after each scan."),
                 color = SecondaryText,
             )
         }

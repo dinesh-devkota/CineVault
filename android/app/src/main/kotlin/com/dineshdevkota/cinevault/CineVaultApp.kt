@@ -7,11 +7,15 @@ import com.dineshdevkota.cinevault.data.CineVaultDatabase
 import com.dineshdevkota.cinevault.data.SecretBox
 import com.dineshdevkota.cinevault.data.Settings
 import com.dineshdevkota.cinevault.library.LibraryScanner
+import com.dineshdevkota.cinevault.metadata.MetadataService
+import com.dineshdevkota.cinevault.metadata.TmdbClient
 import com.dineshdevkota.cinevault.smb.SmbService
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 class CineVaultApp : Application() {
     lateinit var container: AppContainer
@@ -33,7 +37,12 @@ class AppContainer(context: Context) {
     val settings = Settings(context, secrets)
     val database = CineVaultDatabase.create(context)
     val smb = SmbService()
-    val scanner = LibraryScanner(database, secrets, smb::scanVideos)
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+    val metadata = MetadataService(database, TmdbClient(http) { settings.tmdbApiKey })
+    val scanner = LibraryScanner(database, secrets, smb::scanVideos, afterScan = { metadata.fetchMissing()?.failureMessage })
 }
 
 val Context.container: AppContainer get() = (applicationContext as CineVaultApp).container

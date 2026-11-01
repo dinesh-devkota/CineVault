@@ -87,6 +87,37 @@ interface MovieDao {
 
     @Query("UPDATE movies SET isHidden = :hidden WHERE id = :id")
     suspend fun setHidden(id: String, hidden: Boolean)
+
+    /** Stores TMDB details without touching playback state or the user's title. */
+    @Query(
+        "UPDATE movies SET tmdbId = :tmdbId, overview = :overview, tagline = :tagline, runtimeMinutes = :runtimeMinutes, " +
+            "rating = :rating, posterPath = :posterPath, backdropPath = :backdropPath, genres = :genresJson, " +
+            "metadataFetched = 1 WHERE id = :id",
+    )
+    suspend fun applyMetadata(
+        id: String,
+        tmdbId: Int,
+        overview: String?,
+        tagline: String?,
+        runtimeMinutes: Int?,
+        rating: Double?,
+        posterPath: String?,
+        backdropPath: String?,
+        genresJson: String,
+    )
+
+    /** Takes TMDB's title and year unless the user locked the title; a manual re-match ([force]) always does. */
+    @Query(
+        "UPDATE movies SET title = :title, sortTitle = :sortTitle, year = COALESCE(:year, year) " +
+            "WHERE id = :id AND (isLocked = 0 OR :force)",
+    )
+    suspend fun applyMatchedTitle(id: String, title: String, sortTitle: String, year: Int?, force: Boolean)
+
+    @Query("UPDATE movies SET metadataFetched = 1 WHERE id = :id")
+    suspend fun markMetadataFetched(id: String)
+
+    @Query("UPDATE movies SET metadataFetched = 0")
+    suspend fun clearMetadataFetched()
 }
 
 @Database(entities = [SourceEntity::class, MovieEntity::class], version = 1, exportSchema = false)
