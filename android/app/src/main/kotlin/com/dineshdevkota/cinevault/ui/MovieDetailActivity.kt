@@ -159,6 +159,9 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                     OutlinedButton(onClick = { scope.launch { database.movies().setHidden(current.id, !current.isHidden) } }) {
                         Text(if (current.isHidden) "Unhide" else "Hide")
                     }
+                    OutlinedButton(onClick = { EditMovieActivity.start(context, current.id) }) {
+                        Text("Edit")
+                    }
                 }
                 Text(
                     "IN YOUR LIBRARY",

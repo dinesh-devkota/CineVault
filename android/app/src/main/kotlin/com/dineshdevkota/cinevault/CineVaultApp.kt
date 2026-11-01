@@ -6,6 +6,7 @@ import android.util.Log
 import com.dineshdevkota.cinevault.data.CineVaultDatabase
 import com.dineshdevkota.cinevault.data.SecretBox
 import com.dineshdevkota.cinevault.data.Settings
+import com.dineshdevkota.cinevault.library.LibraryEditor
 import com.dineshdevkota.cinevault.library.LibraryScanner
 import com.dineshdevkota.cinevault.metadata.MetadataService
 import com.dineshdevkota.cinevault.metadata.TmdbClient
@@ -43,6 +44,7 @@ class AppContainer(context: Context) {
         .build()
     val metadata = MetadataService(database, TmdbClient(http) { settings.tmdbApiKey })
     val scanner = LibraryScanner(database, secrets, smb::scanVideos, afterScan = { metadata.fetchMissing()?.failureMessage })
+    val editor = LibraryEditor(database, metadata)
 }
 
 val Context.container: AppContainer get() = (applicationContext as CineVaultApp).container

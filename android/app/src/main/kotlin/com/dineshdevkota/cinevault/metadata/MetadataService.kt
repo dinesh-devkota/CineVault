@@ -54,8 +54,10 @@ class MetadataService(private val database: CineVaultDatabase, val tmdb: TmdbCli
                 val pending = movies.needingMetadata()
                 var failed = 0
                 var firstError: String? = null
-                for ((index, movie) in pending.withIndex()) {
+                for ((index, queued) in pending.withIndex()) {
                     statusFlow.value = "Fetching metadata ${index + 1} of ${pending.size}…"
+                    // Re-read so a fix or reset made on the Edit screen during a long batch is not undone.
+                    val movie = movies.get(queued.id)?.takeIf { !it.metadataFetched && !it.isMissing } ?: continue
                     try {
                         match(movie)
                     } catch (e: CancellationException) {

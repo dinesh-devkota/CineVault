@@ -118,6 +118,21 @@ interface MovieDao {
 
     @Query("UPDATE movies SET metadataFetched = 0")
     suspend fun clearMetadataFetched()
+
+    /** A manual rename; locked so rescans and automatic matching keep the user's title. */
+    @Query("UPDATE movies SET title = :title, sortTitle = :sortTitle, year = :year, isLocked = 1 WHERE id = :id")
+    suspend fun rename(id: String, title: String, sortTitle: String, year: Int?)
+
+    @Query("UPDATE movies SET isLocked = 1 WHERE id = :id")
+    suspend fun lock(id: String)
+
+    /** Forgets edits and the TMDB match, back to what a fresh scan of the file shows. */
+    @Query(
+        "UPDATE movies SET title = :title, sortTitle = :sortTitle, year = :year, tmdbId = :tmdbId, isLocked = 0, " +
+            "metadataFetched = 0, overview = NULL, tagline = NULL, runtimeMinutes = NULL, rating = NULL, " +
+            "posterPath = NULL, backdropPath = NULL, genres = :noGenresJson WHERE id = :id",
+    )
+    suspend fun resetToFile(id: String, title: String, sortTitle: String, year: Int?, tmdbId: Int?, noGenresJson: String)
 }
 
 @Database(entities = [SourceEntity::class, MovieEntity::class], version = 1, exportSchema = false)
