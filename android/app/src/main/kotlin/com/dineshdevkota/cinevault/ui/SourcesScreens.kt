@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,7 +35,10 @@ import androidx.tv.material3.Text
 import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.data.MovieEntity
 import com.dineshdevkota.cinevault.data.SourceEntity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SourcesTab(movies: List<MovieEntity>) {
@@ -104,10 +109,25 @@ fun SettingsTab() {
     val container = LocalContext.current.container
     val settings = container.settings
     val metadata = container.metadata
-    var apiKey by remember { mutableStateOf(settings.tmdbApiKey) }
+    val scope = rememberCoroutineScope()
+    var apiKey by remember { mutableStateOf("") }
+    var keyLoaded by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     val fetching by metadata.isRunning.collectAsStateWithLifecycle()
     val status by metadata.status.collectAsStateWithLifecycle()
+
+    LaunchedEffect(settings) {
+        try {
+            apiKey = withContext(Dispatchers.IO) { settings.tmdbApiKey }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            message = e.message ?: "Could not read the saved TMDB key. Enter it again."
+        } finally {
+            keyLoaded = true
+        }
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(start = ScreenPadding, end = ScreenPadding, bottom = 48.dp),
@@ -116,7 +136,8 @@ fun SettingsTab() {
         item { ScreenHeader("Settings") }
         item { Text("Metadata (themoviedb.org)", style = MaterialTheme.typography.titleLarge) }
         item {
-            TvTextField(
+            if (!keyLoaded) Text("Loading saved key…", color = SecondaryText)
+            else TvTextField(
                 apiKey,
                 { apiKey = it },
                 "TMDB API key or read access token",
@@ -127,14 +148,26 @@ fun SettingsTab() {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Button(onClick = {
-                    settings.tmdbApiKey = apiKey
+                Button(enabled = keyLoaded && !saving, onClick = {
+                    val newKey = apiKey
+                    saving = true
                     metadata.clearStatus()
-                    if (apiKey.isBlank()) {
-                        message = "TMDB key removed."
-                    } else {
-                        message = "Fetching metadata…"
-                        container.scope.launch { metadata.fetchMissing() }
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) { settings.tmdbApiKey = newKey }
+                            if (newKey.isBlank()) {
+                                message = "TMDB key removed."
+                            } else {
+                                message = "Fetching metadata…"
+                                container.scope.launch { metadata.fetchMissing() }
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            message = "Could not save the TMDB key. ${e.message.orEmpty()}"
+                        } finally {
+                            saving = false
+                        }
                     }
                 }) {
                     Text("Save Key & Fetch Missing Metadata")
@@ -145,7 +178,7 @@ fun SettingsTab() {
                         message = "Refreshing metadata…"
                         container.scope.launch { metadata.refreshAll() }
                     },
-                    enabled = !fetching,
+                    enabled = keyLoaded && !saving && !fetching,
                 ) {
                     Text(if (fetching) "Updating Metadata…" else "Refresh All Metadata")
                 }

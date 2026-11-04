@@ -31,17 +31,21 @@ class SmbDataSource(private val openFile: () -> RemoteHandle) : BaseDataSource(/
     override fun open(dataSpec: DataSpec): Long {
         uri = dataSpec.uri
         transferInitializing(dataSpec)
-        val file = try {
-            openFile()
+        try {
+            val file = openFile()
+            handle = file
+            bytesRemaining = bytesToServe(dataSpec.position, dataSpec.length, file.length)
+            input = file.stream(dataSpec.position)
         } catch (e: Exception) {
+            // SMBJ may throw a runtime exception while opening the stream as well as the file.
+            // Media3's loader handles IOExceptions; close() still releases a partial open.
             throw asDataSourceException(e)
         }
-        handle = file
-        bytesRemaining = bytesToServe(dataSpec.position, dataSpec.length, file.length)
-        input = file.stream(dataSpec.position)
         opened = true
         transferStarted(dataSpec)
-        return bytesRemaining
+        // Media3 requires a bounded open to return the requested length, even when the
+        // resource ends earlier. bytesRemaining independently limits reads to the real EOF.
+        return if (dataSpec.length == C.LENGTH_UNSET.toLong()) bytesRemaining else dataSpec.length
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
@@ -62,10 +66,12 @@ class SmbDataSource(private val openFile: () -> RemoteHandle) : BaseDataSource(/
 
     override fun close() {
         uri = null
+        val stream = input
         input = null
         val file = handle
         handle = null
         // Closing talks to the NAS; failing to release a handle must not fail playback.
+        runCatching { stream?.close() }
         runCatching { file?.close() }
         if (opened) {
             opened = false

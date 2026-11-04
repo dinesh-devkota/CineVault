@@ -89,7 +89,10 @@ class PlayerActivity : ComponentActivity() {
         playerView.requestFocus()
         val movieId = intent.getStringExtra(EXTRA_MOVIE_ID) ?: return finish()
         val resume = intent.getBooleanExtra(EXTRA_RESUME, false)
-        savedInstanceState?.let { startPositionMs = it.getLong(STATE_POSITION, C.TIME_UNSET) }
+        savedInstanceState?.let {
+            startPositionMs = it.getLong(STATE_POSITION, C.TIME_UNSET)
+            playWhenReady = it.getBoolean(STATE_PLAY_WHEN_READY, true)
+        }
         onBackPressedDispatcher.addCallback(this) {
             // First Back hides the on-screen controls, the next one leaves the player.
             if (playerView.isControllerFullyVisible && player?.playerError == null) playerView.hideController() else finish()
@@ -131,6 +134,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putLong(STATE_POSITION, player?.currentPosition ?: startPositionMs)
+        outState.putBoolean(STATE_PLAY_WHEN_READY, player?.playWhenReady ?: playWhenReady)
     }
 
     private fun startPlayer() {
@@ -195,7 +199,7 @@ class PlayerActivity : ComponentActivity() {
         if (WatchRules.reachedEnd(position, duration)) return markFinished()
         val now = System.currentTimeMillis()
         val movies = container.database.movies()
-        container.scope.launch { movies.saveProgress(movieId, position, duration, now) }
+        container.playbackProgress.enqueue { movies.saveProgress(movieId, position, duration, now) }
     }
 
     private fun markFinished() {
@@ -205,7 +209,7 @@ class PlayerActivity : ComponentActivity() {
         val duration = player?.let(::knownDuration) ?: 0L
         val now = System.currentTimeMillis()
         val movies = container.database.movies()
-        container.scope.launch { movies.markFinished(movieId, duration, now) }
+        container.playbackProgress.enqueue { movies.markFinished(movieId, duration, now) }
     }
 
     private fun knownDuration(exo: ExoPlayer): Long = exo.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
@@ -235,6 +239,7 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_MOVIE_ID = "movie_id"
         private const val EXTRA_RESUME = "resume"
         private const val STATE_POSITION = "position"
+        private const val STATE_PLAY_WHEN_READY = "play_when_ready"
         private const val PROGRESS_INTERVAL_MS = 10_000L
         private const val SEEK_BACK_MS = 10_000L
         private const val SEEK_FORWARD_MS = 30_000L

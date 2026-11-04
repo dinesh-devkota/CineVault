@@ -10,6 +10,7 @@ import com.dineshdevkota.cinevault.library.LibraryEditor
 import com.dineshdevkota.cinevault.library.LibraryScanner
 import com.dineshdevkota.cinevault.metadata.MetadataService
 import com.dineshdevkota.cinevault.metadata.TmdbClient
+import com.dineshdevkota.cinevault.playback.PlaybackProgressWriter
 import com.dineshdevkota.cinevault.smb.SmbService
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class AppContainer(context: Context) {
     val settings = Settings(context, secrets)
     val database = CineVaultDatabase.create(context)
     val smb = SmbService()
+    val playbackProgress = PlaybackProgressWriter(scope)
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
