@@ -1,14 +1,15 @@
 package com.dineshdevkota.cinevault
 
 import android.content.Intent
+import android.os.Build
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Condition
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
-import androidx.test.uiautomator.Until
 import com.dineshdevkota.cinevault.core.LibraryFilter
 import com.dineshdevkota.cinevault.core.LibrarySort
 import com.dineshdevkota.cinevault.data.MovieEntity
@@ -84,7 +85,7 @@ class WatchlistNavigationTest {
         }
         launchHomeAfterScan().use {
             visible("FEATURED") // Wait for the movie rows, rather than the initial empty state.
-            assertFalse("An empty Watchlist rail should disappear", device.hasObject(By.text("Watchlist")))
+            assertFalse("An empty Watchlist rail should disappear", hasVisibleText("Watchlist"))
         }
     }
 
@@ -133,7 +134,7 @@ class WatchlistNavigationTest {
             visible("Source: All sources")
             visible("Beta Nineties")
             visible("1 titles")
-            assertFalse(device.hasObject(By.text("Alpha Nineties")))
+            assertFalse(hasVisibleText("Alpha Nineties"))
             withTimeout(10_000) {
                 while (container.settings.librarySourceId != null) delay(50)
             }
@@ -148,9 +149,9 @@ class WatchlistNavigationTest {
         visible("Decade: 1990s")
         visible("1 titles")
         visible("Alpha Nineties")
-        assertFalse(device.hasObject(By.text("Alpha Recent")))
-        assertFalse(device.hasObject(By.text("Beta Nineties")))
-        assertFalse(device.hasObject(By.text("Alpha Other")))
+        assertFalse(hasVisibleText("Alpha Recent"))
+        assertFalse(hasVisibleText("Beta Nineties"))
+        assertFalse(hasVisibleText("Alpha Other"))
     }
 
     private fun launchDetail(movie: MovieEntity): ActivityScenario<MovieDetailActivity> = ActivityScenario.launch(
@@ -201,10 +202,23 @@ class WatchlistNavigationTest {
     }
 
     private fun visible(text: String) {
-        val found = device.wait(Until.hasObject(By.text(text)), 10_000)
+        val found = device.wait(Condition<UiDevice, Boolean> { hasVisibleText(text) }, 10_000)
         val focus = if (found) "" else focusDiagnostics()
         assertTrue("Expected TV screen text: $text; focused=$focus", found)
         device.waitForIdle()
+    }
+
+    private fun hasVisibleText(text: String): Boolean {
+        // UiAutomator 2.3 searches cached nodes; unlike its UiObject2 getters,
+        // By.text does not refresh stale Compose labels after a filter changes.
+        if (Build.VERSION.SDK_INT >= 34) {
+            InstrumentationRegistry.getInstrumentation().uiAutomation.clearCache()
+        }
+        // ByMatcher already rejects nodes whose isVisibleToUser is false. Also
+        // require current exact text and nonempty bounds clipped to the viewport.
+        return device.findObjects(By.text(text)).any { node ->
+            node.text == text && !node.visibleBounds.isEmpty
+        }
     }
 
     /** Compose may expose a focused host with several unlabeled intermediate accessibility nodes. */
