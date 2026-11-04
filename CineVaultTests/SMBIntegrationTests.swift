@@ -153,6 +153,47 @@ final class SMBIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testResetDoesNotDisconnectAnAcquiredRead() async throws {
+        for resetBySourceID in [false, true] {
+            let config = configuration()
+            let service = SMBService(timeout: 3)
+            let gate = ReadGate()
+            let acquired = expectation(description: "Read acquired the cached connection")
+            let read = Task {
+                try await service.withManager(config) { manager in
+                    if await gate.nextAttempt() == 1 {
+                        acquired.fulfill()
+                        await gate.wait()
+                    }
+                    return try await manager.contents(
+                        atPath: "Movies/Feature (2020)/bytes.bin",
+                        range: UInt64(3)..<UInt64(7), progress: nil
+                    )
+                }
+            }
+            defer { Task { await gate.release() } }
+            await fulfillment(of: [acquired], timeout: 15)
+
+            if resetBySourceID {
+                await service.reset(sourceID: config.id)
+            } else {
+                await service.reset(config)
+            }
+            // A new request can reconnect while the old request still owns its connection.
+            let fresh = try await service.read(
+                config, path: "Movies/Feature (2020)/bytes.bin", offset: 0, length: 3
+            )
+            XCTAssertEqual(fresh, Data("012".utf8))
+            await gate.release()
+            let bytes = try await read.value
+            XCTAssertEqual(bytes, Data("3456".utf8))
+            let attempts = await gate.attempts
+            XCTAssertEqual(attempts, 1, "Reset must not force an acquired read to reconnect.")
+            await service.reset(config)
+        }
+    }
+
+    @MainActor
     func testResetDuringConnectionDoesNotRestoreStaleManager() async throws {
         let config = configuration()
         let gate = ReadGate()

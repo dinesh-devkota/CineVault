@@ -8,6 +8,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Signing is opt-in; ordinary release builds produce an unsigned community bundle.
+val releaseSigningEnabled = when (providers.gradleProperty("cinevault.releaseSigning").orNull) {
+    null, "false" -> false
+    "true" -> true
+    else -> throw GradleException("cinevault.releaseSigning must be true or false.")
+}
+
 android {
     namespace = "com.dineshdevkota.cinevault"
     compileSdk = 36
@@ -21,10 +28,37 @@ android {
         versionName = providers.gradleProperty("cinevault.versionName").orNull ?: "1.0"
     }
 
+    if (releaseSigningEnabled) {
+        val signingEnvironment = listOf(
+            "CINEVAULT_KEYSTORE_PATH",
+            "CINEVAULT_STORE_PASSWORD",
+            "CINEVAULT_KEY_ALIAS",
+            "CINEVAULT_KEY_PASSWORD",
+        ).associateWith { providers.environmentVariable(it).orNull }
+        val missing = signingEnvironment.filterValues { it.isNullOrBlank() }.keys
+        if (missing.isNotEmpty()) {
+            throw GradleException("Release signing requires environment variables: ${missing.joinToString()}")
+        }
+        val signingValues = signingEnvironment.mapValues { it.value!! }
+        val keystore = file(signingValues.getValue("CINEVAULT_KEYSTORE_PATH"))
+        if (!keystore.isFile || !keystore.canRead()) {
+            throw GradleException("CINEVAULT_KEYSTORE_PATH must point to a readable keystore file.")
+        }
+        signingConfigs.create("release") {
+            storeFile = keystore
+            storePassword = signingValues.getValue("CINEVAULT_STORE_PASSWORD")
+            keyAlias = signingValues.getValue("CINEVAULT_KEY_ALIAS")
+            keyPassword = signingValues.getValue("CINEVAULT_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             // smbj pulls in BouncyCastle/Kerberos classes that R8 cannot shrink safely.
             isMinifyEnabled = false
+            if (releaseSigningEnabled) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

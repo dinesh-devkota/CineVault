@@ -141,3 +141,53 @@ StoreKit purchases plus the trial and usage rules for the official tvOS app. Nev
 - `docs/PRIVACY.md` and `.github/workflows/`.
 - The private repo `dinesh-devkota/CineVaultCommercial` (authorized access only).
 - The Copilot app session "Private commercial module".
+
+## Continuation — 2026-11-03 (America/Chicago)
+
+The owner requested continued work on the development branch. The Windows
+checkout is now on `dinesh-devkota-sonepar-build-cinevault-tvos-app`, based on
+`8534ab9`; `main` has not been changed. The earlier sections above remain a
+historical snapshot, rather than a current release approval.
+
+- GitHub CLI access is working as `dinesh-devkota`.
+- Local Android validation passed all 41 JVM tests, lint (zero errors and the
+  same three documented warnings), and the debug APK build using JDK 21 and
+  the installed Android SDK. No Android device is connected.
+- GitHub CI run `41762816806` passed the unsigned tvOS build, Swift core tests,
+  and commercial build-helper tests. The Windows shell could not run three
+  Bash-dependent helper tests; those tests passed on the macOS CI runner.
+- UI preview run `41762822328` passed; its home/detail screenshots were inspected.
+- NAS integration run `41762819399` exposed heap corruption after playback
+  cleanup. Commit `cc280ca` removes forced SMB disconnection during a source
+  reset so acquired reads retain their connection until completion. It adds a
+  deterministic regression for both reset paths. NAS run `41764155265` passed
+  all 20 simulator tests, and CI run `41764157884` passed the updated tvOS build
+  and core/helper tests.
+- Another active task added development validation in `0c97b64`; it was merged
+  without discarding either task's changes (`8e32c7f`).
+- The private fix is on `codex/fix-catalog-refresh`, commit `976a454`. Catalog
+  loading now starts independently of playback authorization, with a gated
+  regression test. The hosted slow-catalog test uses deterministic entitlement
+  data; real StoreKit purchase/refund/restore tests are retained. Unsigned
+  commercial run `41764500086` was approved by the owner and **passed** package
+  tests, the app build, and the commercial simulator suite for that exact
+  private revision using the existing trusted `main` workflow. TestFlight upload
+  was disabled. The fix remains on the private development branch, not `main`.
+- Android release preparation now includes an unsigned community AAB, explicit
+  environment-based signing opt-in, and [build/NAS test instructions](../docs/ANDROID.md).
+  Local tests/lint/debug APK/release AAB passed. Missing and partial settings,
+  an invalid opt-in, and a missing keystore were rejected as intended. A bundle
+  signed with a temporary validation key passed signature verification; the key
+  was removed and the default output rebuilt and verified as unsigned.
+  Billing, the commercial Android trial, Play upload, and real-device tests
+  remain unfinished; this does not complete Android Stage 7.
+- Public implementation revision `e82d53e` passed Android TV run `41765150142`
+  and all five jobs in Development validation run `41765150044`: core/helpers,
+  tvOS build, all 20 NAS simulator tests, Android tests/lint/APK/AAB, and UI
+  previews. Documentation-only follow-ups do not change those tested sources.
+- The owner has an Apple TV and **does not yet have an active Apple Developer
+  membership**. TestFlight remains blocked on membership, app/account setup,
+  signing credentials, and explicit upload approval. Unsigned simulator
+  validation can continue.
+- The `commercial` environment still has only `COMMERCIAL_REPO_TOKEN` as a
+  secret. Do not ask the owner to paste signing credentials into chat.
