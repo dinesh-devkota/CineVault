@@ -130,7 +130,8 @@ actor SMBService {
         if let timeout { manager.timeout = timeout }
         let shares = try await manager.listShares().map { $0.name }
         try Task.checkCancellation()
-        return shares.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return shares.filter { !$0.isEmpty && !$0.hasSuffix("$") }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     /// Lists direct child directories for setup without recursively scanning media.

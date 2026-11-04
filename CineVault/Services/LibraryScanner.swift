@@ -73,18 +73,20 @@ final class LibraryScanner: ObservableObject {
                 for movie in finalInsertions { context.delete(movie) }
                 throw error
             }
-            let scanStatus = "\(source.name): \(files.count) items (\(state.added) new). Updating categories and artwork…"
-            status = scanStatus
+            func scanSummary() -> String {
+                let counts = Dictionary(grouping: source.movies.filter { !$0.isMissing }, by: \.mediaKind)
+                return "\(source.name): \(counts[.movie]?.count ?? 0) movies, \(counts[.documentary]?.count ?? 0) documentaries, \(counts[.tvShow]?.count ?? 0) TV episodes, \(counts[.music]?.count ?? 0) music items (\(state.added) new)"
+            }
+            status = scanSummary()
             do {
                 let result = try await MetadataService.shared.fetchMissing(in: context)
-                let counts = Dictionary(grouping: source.movies.filter { !$0.isMissing }, by: \.mediaKind)
-                let complete = "\(source.name): \(counts[.movie]?.count ?? 0) movies, \(counts[.documentary]?.count ?? 0) documentaries, \(counts[.tvShow]?.count ?? 0) TV episodes, \(counts[.music]?.count ?? 0) music items (\(state.added) new)"
+                let complete = scanSummary()
                 status = complete
                 if let failure = result?.failureMessage {
                     status = "\(complete). \(failure)"
                 }
             } catch {
-                status = "\(scanStatus). Metadata update failed: \(error.localizedDescription)"
+                status = "\(scanSummary()). Metadata update failed: \(error.localizedDescription)"
             }
         } catch is CancellationError {
             status = "Scan cancelled for \(source.name)."

@@ -74,8 +74,8 @@ class NasBrowser {
     companion object {
         private val authenticationStatuses = setOf(0xC000006DL, 0xC000006AL, 0xC0000022L)
 
-        /** MS-SRVS low byte is the share kind; the high bit identifies administrative shares. */
+        /** Hidden shares remain available through manual setup, even if a server omits their flags. */
         internal fun visibleDiskShare(name: String, type: Int): Boolean =
-            name.isNotBlank() && (type and 0xFF) == 0 && (type and Int.MIN_VALUE) == 0
+            name.isNotBlank() && !name.endsWith('$') && (type and 0xFF) == 0 && (type and Int.MIN_VALUE) == 0
     }
 }

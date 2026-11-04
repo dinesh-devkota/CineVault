@@ -237,7 +237,9 @@ final class LibraryUpgradeTests: XCTestCase {
         let applied = try await metadata.apply(tmdbID: 603, to: movie, force: true)
         XCTAssertTrue(applied)
         XCTAssertTrue(movie.isWatchlisted)
-        let scanner = LibraryScanner { _ in [RemoteFile(path: "The Matrix (1999) {tmdb-603}.mp4", size: 200)] }
+        let scanner = LibraryScanner(scanVideos: { _ in
+            [RemoteFile(path: "The Matrix (1999) {tmdb-603}.mp4", size: 200)]
+        })
         await scanner.scan(source, context: context)
 
         XCTAssertEqual(try context.fetch(FetchDescriptor<Movie>()).count, 1)

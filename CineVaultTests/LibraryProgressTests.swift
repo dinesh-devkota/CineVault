@@ -80,6 +80,7 @@ final class LibraryProgressTests: XCTestCase {
         await scanner.scan(source, context: context)
         XCTAssertTrue(old.isMissing)
         XCTAssertNotNil(source.lastScanDate)
-        XCTAssertTrue(scanner.status?.contains("1 movies, 1 documentaries, 0 TV episodes, 0 music items (2 new)") == true)
+        XCTAssertTrue(scanner.status?.contains("1 movies, 1 documentaries, 0 TV episodes, 0 music items (2 new)") == true,
+                      scanner.status ?? "No scan status")
     }
 }

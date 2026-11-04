@@ -54,10 +54,10 @@ final class LibraryBehaviorTests: XCTestCase {
         let firstID = first.id
         let gate = ScanGate()
         defer { gate.release() }
-        let scanner = LibraryScanner { config in
+        let scanner = LibraryScanner(scanVideos: { config in
             if config.id == firstID { await gate.wait() }
             return [RemoteFile(path: "\(config.id.uuidString).mp4", size: 1)]
-        }
+        })
 
         let firstTask = Task { await scanner.scan(first, context: context) }
         let deadline = Date().addingTimeInterval(5)
@@ -118,11 +118,11 @@ final class LibraryBehaviorTests: XCTestCase {
         try context.save()
         let gate = ScanGate()
         defer { gate.release() }
-        let scanner = LibraryScanner { _ in
+        let scanner = LibraryScanner(scanVideos: { _ in
             // A NAS request may finish normally even after its caller is cancelled.
             await gate.wait()
             return [RemoteFile(path: "Late.mp4", size: 200)]
-        }
+        })
         let scan = Task { await scanner.scan(source, context: context) }
         guard await waitUntilEntered(gate) else { XCTFail("Scan did not start."); return }
 

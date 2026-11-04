@@ -17,4 +17,11 @@ class NasBrowserTest {
         assertFalse(NasBrowser.visibleDiskShare("Printer", 1))
         assertFalse(NasBrowser.visibleDiskShare("", 0))
     }
+
+    @Test fun excludesHiddenNamesEvenWhenReportedAsOrdinaryDiskShares() {
+        assertFalse(NasBrowser.visibleDiskShare("IPC$", 0))
+        assertFalse(NasBrowser.visibleDiskShare("ADMIN$", 0))
+        assertFalse(NasBrowser.visibleDiskShare("Private$", 0))
+        assertTrue(NasBrowser.visibleDiskShare("Movie $ Collection", 0))
+    }
 }
