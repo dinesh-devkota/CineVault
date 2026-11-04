@@ -1,6 +1,7 @@
 package com.dineshdevkota.cinevault.data
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -52,7 +53,7 @@ data class SourceEntity(
 )
 data class MovieEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val sourceId: String,
+    override val sourceId: String,
     val filePath: String,
     override val fileName: String,
     val fileSize: Long,
@@ -74,6 +75,8 @@ data class MovieEntity(
     val isLocked: Boolean = false,
     override val addedAt: Long = System.currentTimeMillis(),
     override val isWatched: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    override val isWatchlisted: Boolean = false,
     override val playbackPositionMs: Long = 0,
     val durationMs: Long = 0,
     override val lastPlayedAt: Long? = null,

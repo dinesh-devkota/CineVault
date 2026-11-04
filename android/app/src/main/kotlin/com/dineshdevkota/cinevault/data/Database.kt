@@ -11,6 +11,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.Update
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -88,6 +90,9 @@ interface MovieDao {
     @Query("UPDATE movies SET isHidden = :hidden WHERE id = :id")
     suspend fun setHidden(id: String, hidden: Boolean)
 
+    @Query("UPDATE movies SET isWatchlisted = :watchlisted WHERE id = :id")
+    suspend fun setWatchlisted(id: String, watchlisted: Boolean)
+
     /** Stores TMDB details without touching playback state or the user's title. */
     @Query(
         "UPDATE movies SET tmdbId = :tmdbId, overview = :overview, tagline = :tagline, runtimeMinutes = :runtimeMinutes, " +
@@ -135,14 +140,22 @@ interface MovieDao {
     suspend fun resetToFile(id: String, title: String, sortTitle: String, year: Int?, tmdbId: Int?, noGenresJson: String)
 }
 
-@Database(entities = [SourceEntity::class, MovieEntity::class], version = 1, exportSchema = false)
+@Database(entities = [SourceEntity::class, MovieEntity::class], version = 2, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class CineVaultDatabase : RoomDatabase() {
     abstract fun sources(): SourceDao
     abstract fun movies(): MovieDao
 
     companion object {
-        fun create(context: Context): CineVaultDatabase =
-            Room.databaseBuilder(context, CineVaultDatabase::class.java, "cinevault.db").build()
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE movies ADD COLUMN isWatchlisted INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        fun create(context: Context, name: String = "cinevault.db"): CineVaultDatabase =
+            Room.databaseBuilder(context, CineVaultDatabase::class.java, name)
+                .addMigrations(MIGRATION_1_2)
+                .build()
     }
 }

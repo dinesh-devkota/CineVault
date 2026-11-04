@@ -13,10 +13,12 @@ private data class Entry(
     override val addedAt: Long = 0,
     override val lastPlayedAt: Long? = null,
     override val isWatched: Boolean = false,
+    override val isWatchlisted: Boolean = false,
     override val isHidden: Boolean = false,
     override val isMissing: Boolean = false,
     override val playbackPositionMs: Long = 0,
     override val fileName: String = "$title.mkv",
+    override val sourceId: String? = null,
 ) : LibraryEntry {
     override val sortTitle: String get() = WatchRules.sortTitle(title)
 }
@@ -61,6 +63,83 @@ class LibraryTest {
         assertFalse(LibraryQuery.searchMatches(heat, "  "))
         assertFalse(LibraryQuery.searchMatches(hidden, "hidden"))
         assertFalse(LibraryQuery.searchMatches(missing, "gone"))
+    }
+
+    @Test fun watchlistCombinesWithSourceDecadeGenreAndSelectedSort() {
+        val first = heat.copy(isWatchlisted = true, sourceId = "living-room")
+        val second = Entry(
+            "The Arrival", year = 1996, genres = listOf("Crime"), addedAt = 2,
+            isWatchlisted = true, sourceId = "living-room",
+        )
+        val items = listOf(
+            first, second,
+            first.copy(title = "Other NAS", sourceId = "office"),
+            first.copy(title = "Other decade", year = 1989),
+            first.copy(title = "Other genre", genres = listOf("Comedy")),
+            first.copy(title = "Not saved", isWatchlisted = false),
+            first.copy(title = "Unknown year", year = null),
+            first.copy(title = "Unknown source", sourceId = null),
+            first.copy(title = "Hidden", isHidden = true),
+            first.copy(title = "Missing", isMissing = true),
+        )
+
+        assertEquals(
+            listOf(second, first),
+            LibraryQuery.visible(
+                items, LibrarySort.RECENTLY_ADDED, LibraryFilter.WATCHLIST, "Crime",
+                sourceId = "living-room", decade = 1990,
+            ),
+        )
+        assertTrue(LibraryQuery.visible(items, LibrarySort.TITLE, LibraryFilter.ALL, null, sourceId = "deleted").isEmpty())
+    }
+
+    @Test fun decadeIncludesBothBoundariesAndExcludesUnknownYears() {
+        val start = Entry("Start", year = 1990)
+        val end = Entry("End", year = 1999)
+        val items = listOf(start, end, Entry("Before", year = 1989), Entry("After", year = 2000), Entry("Unknown"))
+        assertEquals(
+            listOf(end, start),
+            LibraryQuery.visible(items, LibrarySort.TITLE, LibraryFilter.ALL, null, decade = 1990),
+        )
+        assertEquals(5, LibraryQuery.visible(items, LibrarySort.TITLE, LibraryFilter.ALL, null).size)
+    }
+
+    @Test fun hiddenFilterStillHonorsSourceAndDecadeAndExcludesMissing() {
+        val selected = Entry("Hidden", year = 1995, sourceId = "nas", isHidden = true, isWatchlisted = true)
+        val items = listOf(
+            selected, selected.copy(title = "Other source", sourceId = "other"),
+            selected.copy(title = "Other decade", year = 2001), selected.copy(title = "Missing", isMissing = true),
+        )
+        assertEquals(
+            listOf(selected),
+            LibraryQuery.visible(items, LibrarySort.TITLE, LibraryFilter.HIDDEN, null, sourceId = "nas", decade = 1990),
+        )
+        assertTrue(LibraryQuery.watchlist(items).isEmpty())
+        assertTrue(selected.isWatchlisted)
+    }
+
+    @Test fun watchlistKeepsWatchedAndInProgressMoviesAndSortsByTitle() {
+        val watched = matrix.copy(isWatchlisted = true)
+        val inProgress = alien.copy(isWatchlisted = true)
+        val unplayed = heat.copy(isWatchlisted = true)
+        val items = listOf(
+            watched, inProgress, unplayed,
+            Entry("Unlisted"), hidden.copy(isWatchlisted = true), missing.copy(isWatchlisted = true),
+        )
+        assertEquals(listOf(inProgress, unplayed, watched), LibraryQuery.watchlist(items))
+        assertEquals(listOf(inProgress), LibraryQuery.continueWatching(items))
+        assertTrue(watched.isWatched)
+        assertEquals(60_000L, inProgress.playbackPositionMs)
+    }
+
+    @Test fun decadesAreUniqueNewestFirstAndExcludeHiddenMissingAndUnknownYears() {
+        val items = listOf(
+            Entry("New", year = 2024), Entry("Same decade", year = 2020),
+            heat, matrix, Entry("Early cinema", year = 1888), Entry("Unknown"),
+            hidden.copy(year = 1935), missing.copy(year = 1985),
+        )
+        assertEquals(listOf(2020, 1990, 1880), LibraryQuery.decades(items))
+        assertEquals(emptyList<Int>(), LibraryQuery.decades(emptyList()))
     }
 
     @Test fun watchRules() {

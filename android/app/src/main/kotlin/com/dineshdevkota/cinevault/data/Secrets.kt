@@ -88,6 +88,20 @@ class Settings(context: Context, private val secrets: SecretBox) {
         get() = enumValue(FILTER_KEY, LibraryFilter.ALL)
         set(value) = prefs.edit { putString(FILTER_KEY, value.name) }
 
+    var libraryGenre: String?
+        get() = prefs.getString(GENRE_KEY, null)
+        set(value) = prefs.edit { putString(GENRE_KEY, value) }
+
+    var librarySourceId: String?
+        get() = prefs.getString(SOURCE_KEY, null)
+        set(value) = prefs.edit { putString(SOURCE_KEY, value) }
+
+    var libraryDecade: Int?
+        get() = prefs.getInt(DECADE_KEY, -1).takeIf { it > 0 && it % 10 == 0 }
+        set(value) = prefs.edit {
+            if (value == null) remove(DECADE_KEY) else putInt(DECADE_KEY, value)
+        }
+
     private inline fun <reified T : Enum<T>> enumValue(key: String, default: T): T =
         prefs.getString(key, null)?.let { name -> enumValues<T>().firstOrNull { it.name == name } } ?: default
 
@@ -95,5 +109,8 @@ class Settings(context: Context, private val secrets: SecretBox) {
         const val TMDB_KEY = "tmdb_api_key"
         const val SORT_KEY = "library_sort"
         const val FILTER_KEY = "library_filter"
+        const val GENRE_KEY = "library_genre"
+        const val SOURCE_KEY = "library_source"
+        const val DECADE_KEY = "library_decade"
     }
 }

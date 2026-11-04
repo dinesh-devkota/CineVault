@@ -133,6 +133,7 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
     val status by LocalContext.current.container.scanner.status.collectAsStateWithLifecycle()
     val available = remember(movies) { movies.filter { !it.isHidden && !it.isMissing }.sortedByDescending { it.addedAt } }
     val continuing = remember(movies) { LibraryQuery.continueWatching(movies).take(20) }
+    val watchlist = remember(movies) { LibraryQuery.watchlist(movies).take(20) }
     val unwatched = remember(available) { available.filter { !it.isWatched }.take(20) }
     val featured = remember(available) {
         val fresh = available.filter { !it.isWatched && !it.isInProgress }
@@ -157,6 +158,7 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
             }
         } else {
             if (continuing.isNotEmpty()) item { MovieRow("Continue Watching", continuing, onOpen, wide = true) }
+            if (watchlist.isNotEmpty()) item { MovieRow("Watchlist", watchlist, onOpen) }
             featured?.let { movie -> item { FeaturedCard(movie, onClick = { onOpen(movie) }) } }
             item { MovieRow("Recently Added", available.take(20), onOpen) }
             if (unwatched.isNotEmpty()) item { MovieRow("Unwatched", unwatched, onOpen) }
@@ -224,31 +226,64 @@ private fun LazyGridScope.posters(movies: List<MovieEntity>, onOpen: (MovieEntit
 
 @Composable
 private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
-    val settings = LocalContext.current.container.settings
+    val container = LocalContext.current.container
+    val settings = container.settings
+    val sources by remember { container.database.sources().observeAll() }.collectAsStateWithLifecycle(initialValue = null)
     var sort by remember { mutableStateOf(settings.librarySort) }
     var filter by remember { mutableStateOf(settings.libraryFilter) }
-    var genre by rememberSaveable { mutableStateOf<String?>(null) }
+    var genre by remember { mutableStateOf(settings.libraryGenre) }
+    var sourceId by remember { mutableStateOf(settings.librarySourceId) }
+    var decade by remember { mutableStateOf(settings.libraryDecade) }
     val genres = remember(movies) { listOf<String?>(null) + LibraryQuery.genres(movies) }
-    val visible = remember(movies, sort, filter, genre) { LibraryQuery.visible(movies, sort, filter, genre) }
+    val decades = remember(movies) { listOf<Int?>(null) + LibraryQuery.decades(movies) }
+    // Wait for the first source result before clearing a saved selection. An empty
+    // loading placeholder must not erase the user's preference on every launch.
+    val selectedSourceId = sourceId.takeIf { id -> sources?.any { it.id == id } != false }
+    LaunchedEffect(sources, sourceId) {
+        if (sources != null && selectedSourceId != sourceId) {
+            sourceId = null
+            settings.librarySourceId = null
+        }
+    }
+    val visible = remember(movies, sort, filter, genre, selectedSourceId, decade) {
+        LibraryQuery.visible(movies, sort, filter, genre, selectedSourceId, decade)
+    }
 
     MovieGrid {
         fullWidth { ScreenHeader("Movies", kicker = "YOUR COLLECTION", trailing = "${visible.size} titles") }
         fullWidth {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                CycleButton("Sort", sort, LibrarySort.entries, { it.label }, {
-                    sort = it
-                    settings.librarySort = it
-                })
-                CycleButton("Show", filter, LibraryFilter.entries, { it.label }, {
-                    filter = it
-                    settings.libraryFilter = it
-                })
-                CycleButton("Genre", genre, genres, { it ?: "All" }, { genre = it })
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    CycleButton("Sort", sort, LibrarySort.entries, { it.label }, {
+                        sort = it
+                        settings.librarySort = it
+                    })
+                    CycleButton("Show", filter, LibraryFilter.entries, { it.label }, {
+                        filter = it
+                        settings.libraryFilter = it
+                    })
+                    CycleButton("Genre", genre, genres, { it ?: "All" }, {
+                        genre = it
+                        settings.libraryGenre = it
+                    }, Modifier.width(240.dp))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    CycleButton("Source", selectedSourceId, listOf<String?>(null) + sources.orEmpty().map { it.id }, { id ->
+                        sources?.firstOrNull { it.id == id }?.name ?: "All sources"
+                    }, {
+                        sourceId = it
+                        settings.librarySourceId = it
+                    }, Modifier.width(320.dp))
+                    CycleButton("Decade", decade, decades, { it?.let { year -> "${year}s" } ?: "All decades" }, {
+                        decade = it
+                        settings.libraryDecade = it
+                    })
+                }
             }
         }
         when {
             movies.isEmpty() -> fullWidth { EmptyState("No movies yet", "Add your NAS in the Sources tab.") }
-            visible.isEmpty() -> fullWidth { EmptyState("No matching movies", "Try another filter or genre.") }
+            visible.isEmpty() -> fullWidth { EmptyState("No matching movies", "Try another filter, source, decade or genre.") }
             else -> posters(visible, onOpen)
         }
     }
