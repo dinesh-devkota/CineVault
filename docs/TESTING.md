@@ -24,6 +24,7 @@ The managed Linux environment has cache and tool activation instructions in
 - NAS source edits/deletion while a scan is suspended.
 - Media3 DataSource byte-range/EOF behavior and cleanup after a failed open.
 - Authenticated SMB scans, range reads, bad credentials, and reconnection.
+- Media3 playback over SMB, with rendered frames, advancing video, and resumed playback after seeking.
 
 The `Android TV` workflow uses an Android TV API 36 x86_64 emulator
 and a synthetic SMB share. The fixture has no access to a user's NAS or secrets.
@@ -48,16 +49,16 @@ to execute with no failures or skips. Reports are uploaded as
 The public workflows build the tvOS app on macOS, run XCTest with the synthetic
 SMB fixture, and check screenshots for stable Home/detail content. Regression
 tests cover invalidated connections, cancelled scans, byte-range validation,
-late playback callbacks, concurrent manual/automatic matches, and metadata reset.
+late playback callbacks, concurrent manual/automatic matches, metadata reset,
+and responses or queued matches after source deletion.
 
 ## Further device testing
 
 Automated checks do not establish compatibility with every NAS or codec. Before
 a release, test real Synology/QNAP/Windows shares, disconnect/reconnect during
 playback, seeking in large files, subtitle/audio selection, and remote focus
-behavior on real Apple TV and Android TV hardware. Android Media3 playback/seek
-tests with actual video and tvOS remote-navigation UI tests would further extend
-the current stream and screenshot checks. The private commercial package and
+behavior on real Apple TV and Android TV hardware. tvOS remote-navigation UI
+tests would further extend the current playback and screenshot checks. The private commercial package and
 store purchases/signing have their own protected validation workflow.
 
 ## Online sources consulted
