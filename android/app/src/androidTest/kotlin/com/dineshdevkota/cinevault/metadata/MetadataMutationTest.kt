@@ -7,6 +7,7 @@ import com.dineshdevkota.cinevault.data.CineVaultDatabase
 import com.dineshdevkota.cinevault.data.MovieEntity
 import com.dineshdevkota.cinevault.data.SourceEntity
 import com.dineshdevkota.cinevault.library.LibraryEditor
+import com.dineshdevkota.cinevault.playback.PlaybackProgressWriter
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -78,7 +79,7 @@ class MetadataMutationTest {
             val movie = movie()
             val replies = Replies()
             val service = MetadataService(database, TmdbClient(replies.client) { "key" })
-            val editor = LibraryEditor(database, service)
+            val editor = LibraryEditor(database, service, PlaybackProgressWriter(this))
             val automatic = async(Dispatchers.IO) { service.match(movie) }
             replies.started.await()
             val manual = async(start = CoroutineStart.UNDISPATCHED) { editor.fixMatch(movie.id, 2) }

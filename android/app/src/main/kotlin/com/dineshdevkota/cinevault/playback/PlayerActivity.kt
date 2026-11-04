@@ -115,7 +115,8 @@ class PlayerActivity : ComponentActivity() {
 
     private suspend fun load(movieId: String): Target {
         val database = container.database
-        val movie = database.movies().get(movieId) ?: throw SmbException("This movie is no longer in the library.")
+        val movie = container.playbackProgress.await { database.movies().get(movieId) }
+            ?: throw SmbException("This movie is no longer in the library.")
         val source = database.sources().get(movie.sourceId) ?: throw SmbException("This movie's NAS source was removed.")
         val config = withContext(Dispatchers.Default) { source.config(container.secrets) }
         return Target(movie, config)

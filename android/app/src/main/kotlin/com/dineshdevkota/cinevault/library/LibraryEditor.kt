@@ -5,6 +5,7 @@ import com.dineshdevkota.cinevault.core.TmdbMovieSummary
 import com.dineshdevkota.cinevault.core.WatchRules
 import com.dineshdevkota.cinevault.data.CineVaultDatabase
 import com.dineshdevkota.cinevault.metadata.MetadataService
+import com.dineshdevkota.cinevault.playback.PlaybackProgressWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -12,7 +13,11 @@ import kotlinx.coroutines.withContext
  * Manual library management from the Edit screen: rename, re-match, and resets (tvOS parity).
  * TMDB calls run on [Dispatchers.IO] because reading the sealed API key blocks.
  */
-class LibraryEditor(private val database: CineVaultDatabase, private val metadata: MetadataService) {
+class LibraryEditor(
+    private val database: CineVaultDatabase,
+    private val metadata: MetadataService,
+    private val progressWriter: PlaybackProgressWriter,
+) {
     suspend fun rename(movieId: String, edit: TitleEdit.Valid) {
         database.movies().rename(movieId, edit.title, WatchRules.sortTitle(edit.title), edit.year)
     }
@@ -26,8 +31,11 @@ class LibraryEditor(private val database: CineVaultDatabase, private val metadat
         metadata.apply(tmdbId, movieId, force = true)
     }
 
-    suspend fun resetProgress(movieId: String) {
-        database.movies().setWatched(movieId, false)
+    suspend fun resetProgress(movieId: String) = setWatched(movieId, false)
+
+    /** Queue behind the player's final save so it cannot undo this later user action. */
+    suspend fun setWatched(movieId: String, watched: Boolean) {
+        progressWriter.await { database.movies().setWatched(movieId, watched) }
     }
 
     /**

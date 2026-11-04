@@ -46,7 +46,7 @@ class AppContainer(context: Context) {
         .build()
     val metadata = MetadataService(database, TmdbClient(http) { settings.tmdbApiKey })
     val scanner = LibraryScanner(database, secrets, smb::scanVideos, afterScan = { metadata.fetchMissing()?.failureMessage })
-    val editor = LibraryEditor(database, metadata)
+    val editor = LibraryEditor(database, metadata, playbackProgress)
 }
 
 val Context.container: AppContainer get() = (applicationContext as CineVaultApp).container
