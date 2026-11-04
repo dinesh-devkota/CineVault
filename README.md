@@ -2,6 +2,14 @@
 
 A Plex-style movie library for **Apple TV** that reads your movies **directly from a NAS over SMB** — no media server, no transcoding box. Native tvOS SwiftUI app.
 
+## Android TV development
+
+The development branch also includes an Android TV app with direct SMB playback,
+library management, search, and TMDB metadata. See the [Android guide](docs/ANDROID.md)
+for build and installation instructions, release signing, and a first NAS playback
+test. Android billing and Google Play distribution remain pending. Real Android TV
+device and NAS validation has not yet been completed.
+
 ## Features
 
 - Add one or more NAS sources (SMB2/3: Synology, QNAP, TrueNAS, Windows shares…). Passwords live in the Keychain.
