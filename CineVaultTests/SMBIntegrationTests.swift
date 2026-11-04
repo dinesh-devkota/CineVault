@@ -153,22 +153,26 @@ final class SMBIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testResetDoesNotDisconnectAnAcquiredRead() async throws {
+    func testResetLetsAcquiredReadFinishBeforeRejectingStaleResult() async throws {
         for resetBySourceID in [false, true] {
             let config = configuration()
             let service = SMBService(timeout: 3)
             let gate = ReadGate()
             let acquired = expectation(description: "Read acquired the cached connection")
+            let completed = expectation(description: "Acquired read finishes on its retained connection")
             let read = Task {
                 try await service.withManager(config) { manager in
                     if await gate.nextAttempt() == 1 {
                         acquired.fulfill()
                         await gate.wait()
                     }
-                    return try await manager.contents(
+                    let bytes = try await manager.contents(
                         atPath: "Movies/Feature (2020)/bytes.bin",
                         range: UInt64(3)..<UInt64(7), progress: nil
                     )
+                    XCTAssertEqual(bytes, Data("3456".utf8), "Reset must leave the acquired connection usable until its read finishes.")
+                    completed.fulfill()
+                    return bytes
                 }
             }
             defer { Task { await gate.release() } }
@@ -185,8 +189,13 @@ final class SMBIntegrationTests: XCTestCase {
             )
             XCTAssertEqual(fresh, Data("012".utf8))
             await gate.release()
-            let bytes = try await read.value
-            XCTAssertEqual(bytes, Data("3456".utf8))
+            do {
+                _ = try await read.value
+                XCTFail("The completed read belongs to the previous source generation.")
+            } catch {
+                XCTAssertEqual(error as? SMBError, .sourceChanged)
+            }
+            await fulfillment(of: [completed], timeout: 15)
             let attempts = await gate.attempts
             XCTAssertEqual(attempts, 1, "Reset must not force an acquired read to reconnect.")
             await service.reset(config)
