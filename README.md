@@ -10,7 +10,7 @@ for build and installation instructions, release signing, and a first NAS playba
 test. Android billing and Google Play distribution remain pending. Real Android TV
 device and NAS validation has not yet been completed.
 
-## Features
+## Apple TV features
 
 - Add one or more NAS sources (SMB2/3: Synology, QNAP, TrueNAS, Windows shares…). Passwords live in the Keychain.
 - Recursive scan for movie files; skips samples, trailers, extras and NAS metadata folders (`@eaDir`, `#recycle`, …). Playback checks the current file size on the NAS, even if a file changed since its last scan.

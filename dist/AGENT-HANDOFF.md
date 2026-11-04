@@ -169,9 +169,10 @@ historical snapshot, rather than a current release approval.
   loading now starts independently of playback authorization, with a gated
   regression test. The hosted slow-catalog test uses deterministic entitlement
   data; real StoreKit purchase/refund/restore tests are retained. Unsigned
-  commercial run `41764500086` was approved by the owner and is validating that
-  exact private revision using the existing trusted `main` workflow. Check its
-  conclusion before treating the regression as resolved.
+  commercial run `41764500086` was approved by the owner and **passed** package
+  tests, the app build, and the commercial simulator suite for that exact
+  private revision using the existing trusted `main` workflow. TestFlight upload
+  was disabled. The fix remains on the private development branch, not `main`.
 - Android release preparation now includes an unsigned community AAB, explicit
   environment-based signing opt-in, and [build/NAS test instructions](../docs/ANDROID.md).
   Local tests/lint/debug APK/release AAB passed. Missing and partial settings,
@@ -180,6 +181,10 @@ historical snapshot, rather than a current release approval.
   was removed and the default output rebuilt and verified as unsigned.
   Billing, the commercial Android trial, Play upload, and real-device tests
   remain unfinished; this does not complete Android Stage 7.
+- Public implementation revision `e82d53e` passed Android TV run `41765150142`
+  and all five jobs in Development validation run `41765150044`: core/helpers,
+  tvOS build, all 20 NAS simulator tests, Android tests/lint/APK/AAB, and UI
+  previews. Documentation-only follow-ups do not change those tested sources.
 - The owner has an Apple TV and **does not yet have an active Apple Developer
   membership**. TestFlight remains blocked on membership, app/account setup,
   signing credentials, and explicit upload approval. Unsigned simulator
