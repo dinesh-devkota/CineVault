@@ -1,9 +1,8 @@
 # Development in the managed Linux environment
 
 Read [the agent handoff](../dist/AGENT-HANDOFF.md) before continuing development.
-The Android TV app and handoff are on
-`dinesh-devkota-sonepar-build-cinevault-tvos-app`; `main` currently contains the
-tvOS app. Use the existing checkout at `/workspace/CineVault`. Cloud tasks already
+Both TV apps and the handoff are now on `main`. Development continues on
+`dinesh-devkota-sonepar-build-cinevault-tvos-app`. Use the existing checkout at `/workspace/CineVault`. Cloud tasks already
 have isolated environments; do not create a Git worktree unless requested.
 
 ## Prepared tools
@@ -39,12 +38,13 @@ initialized again after the environment is restored.
 
 ## Build and test
 
-Run the Android JVM tests, lint, and debug APK build:
+Run the Android JVM tests, debug/release lint, APK builds, and unsigned release bundle:
 
 ```bash
 cd /workspace/CineVault/android
 ./gradlew --no-daemon --max-workers=4 \
-  :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+  :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug \
+  :app:lintRelease :app:assembleRelease :app:bundleRelease
 ```
 
 The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
@@ -78,18 +78,22 @@ The installers preserve checksum or release-signature verification. Generated
 build outputs and caches are local setup artifacts; leave tracked source,
 dependency declarations, and lockfiles unchanged during environment setup.
 
-## Validation during onboarding
+## Validation
 
-On this Linux instance, the Android workflow passed 41 JVM tests (28 core and
-13 app), lint with zero errors and three warnings (`VectorRaster`,
-`DataExtractionRules`, `ObsoleteSdkInt`), and the debug APK build. The generated
-APK's signature was verified. Swift debug and release builds and all 14 XCTest
-tests passed. All five Python helper tests passed.
+The initial setup passed 41 JVM tests and 14 Swift package tests. The current
+library upgrades pass 67 JVM tests (38 core and 29 app), debug/release lint with
+zero errors and the same three warnings (`VectorRaster`, `DataExtractionRules`,
+`ObsoleteSdkInt`), APK builds, and the unsigned release bundle. The Swift package
+now has 19 tests; all five Python helper tests also pass. Check current reports
+as coverage grows. See [TESTING.md](TESTING.md) for simulator/emulator coverage
+and the handoff for the latest completed GitHub runs.
 
 ## Platform limits
 
-This build environment does not include an Android emulator. Building an APK and
-passing JVM tests do not verify playback, TV controls, or access to a real NAS.
+This Linux workspace does not include an Android emulator. The Android GitHub
+workflow runs an Android TV emulator with a synthetic SMB share, including real
+video playback/seek and remote-control tests. Physical TVs, real NAS devices,
+and codec compatibility still require device testing.
 
 The full tvOS app, Apple TV simulator, Keychain, and playback integration tests
 require macOS with Xcode. Use the repository's existing GitHub Actions workflows
