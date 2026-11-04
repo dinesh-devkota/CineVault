@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,6 +40,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,19 +73,32 @@ fun RootScreen() {
 
     var tabRowFocused by remember { mutableStateOf(false) }
     var initialFocusRequested by remember { mutableStateOf(false) }
+    val view = LocalView.current
+    var ownerFocused by remember(view) { mutableStateOf(view.hasFocus()) }
     val windowFocused = LocalWindowInfo.current.isWindowFocused
+
+    DisposableEffect(view) {
+        val observer = view.viewTreeObserver
+        val listener = android.view.ViewTreeObserver.OnGlobalFocusChangeListener { _, _ ->
+            ownerFocused = view.hasFocus()
+        }
+        observer.addOnGlobalFocusChangeListener(listener)
+        onDispose { if (observer.isAlive) observer.removeOnGlobalFocusChangeListener(listener) }
+    }
 
     // Like tvOS: Back first returns to the tab bar, then to Home, then leaves the app.
     BackHandler(enabled = !tabRowFocused || tab != 0) {
         if (tabRowFocused) tab = 0
         tabFocus[tab].requestFocus()
     }
-    // The saved tab can compose before a recreated activity regains window focus.
-    // Requesting focus then is lost, and the first D-pad press only establishes
-    // focus instead of navigating. Restore it once the window accepts input.
-    LaunchedEffect(windowFocused) {
+    // A recreated window can have focus while its Compose view does not. Acquire
+    // Android view focus before restoring the Compose target, so the first remote
+    // key navigates. Preserve the saved tab across the owner's initial focus search.
+    LaunchedEffect(windowFocused, ownerFocused) {
         if (windowFocused && !initialFocusRequested) {
-            initialFocusRequested = tabFocus[tab].requestFocus()
+            val selectedTab = tab
+            if (!view.hasFocus()) view.requestFocus()
+            initialFocusRequested = tabFocus[selectedTab].requestFocus() && view.hasFocus()
         }
     }
 

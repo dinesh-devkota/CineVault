@@ -16,10 +16,12 @@ import java.io.ByteArrayOutputStream
 class TVNavigationTest {
     private val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
     private val focusSnapshots = mutableListOf<String>()
+    private var scenario: ActivityScenario<MainActivity>? = null
 
     @Test
     fun remoteCanReachEveryTabAndReturnHome() {
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { activity ->
+            scenario = activity
             visible("Your movie collection starts here")
             device.pressDPadRight()
             visible("No movies yet")
@@ -37,24 +39,22 @@ class TVNavigationTest {
     @Test
     fun selectedTabAndFocusSurviveActivityRecreation() {
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
+            scenario = activity
             visible("Your movie collection starts here")
             repeat(3) { device.pressDPadRight() }
             visible("No NAS sources yet")
-            captureFocus("before recreate", activity)
             activity.recreate()
             visible("No NAS sources yet")
-            captureFocus("after recreate", activity)
             device.pressDPadRight()
-            captureFocus("after Right", activity)
             visible("Metadata (themoviedb.org)")
         }
     }
 
-    private fun captureFocus(stage: String, activity: ActivityScenario<MainActivity>? = null) {
+    private fun captureFocus(stage: String) {
         var window = ""
-        activity?.onActivity {
+        scenario?.onActivity {
             window = " windowFocused=${it.window.decorView.hasWindowFocus()} lifecycle=${it.lifecycle.currentState}" +
-                " viewFocus=${it.currentFocus?.javaClass?.simpleName}"
+                " viewFocus=${it.currentFocus?.javaClass?.simpleName} touchMode=${it.window.decorView.isInTouchMode}"
         }
         val xml = ByteArrayOutputStream().also { device.dumpWindowHierarchy(it) }.toString("UTF-8")
         val relevant = Regex("<node\\b[^>]*>").findAll(xml).map { it.value }.filter { node ->
