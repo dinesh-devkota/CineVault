@@ -6,6 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.util.Pair
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -13,6 +19,7 @@ import androidx.activity.addCallback
 import androidx.annotation.OptIn
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -49,6 +56,9 @@ class PlayerActivity : ComponentActivity() {
     private class Target(val movie: MovieEntity, val config: SourceConfig)
 
     private lateinit var playerView: PlayerView
+    private lateinit var information: LinearLayout
+    private lateinit var titleLabel: TextView
+    private lateinit var detailLabel: TextView
     private var target: Target? = null
     private var player: ExoPlayer? = null
     private var progressJob: Job? = null
@@ -85,7 +95,30 @@ class PlayerActivity : ComponentActivity() {
             // Focused, the view gets D-pad presses (first one shows the controls) and remote media keys.
             isFocusable = true
         }
-        setContentView(playerView)
+        val spacing = (24 * resources.displayMetrics.density).toInt()
+        titleLabel = TextView(this).apply { setTextColor(Color.WHITE); textSize = 24f; maxLines = 2 }
+        detailLabel = TextView(this).apply { setTextColor(Color.LTGRAY); textSize = 15f; maxLines = 3 }
+        information = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(spacing, spacing, spacing, spacing)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xD9000000.toInt(), Color.TRANSPARENT))
+            isFocusable = false
+            addView(LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(titleLabel, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(android.widget.Button(this@PlayerActivity).apply {
+                    setText(com.dineshdevkota.cinevault.R.string.back)
+                    contentDescription = "Back to media details"
+                    setOnClickListener { finish() }
+                })
+            })
+            addView(detailLabel)
+        }
+        setContentView(FrameLayout(this).apply {
+            addView(playerView, FrameLayout.LayoutParams(-1, -1))
+            addView(information, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        })
+        playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility -> information.visibility = visibility })
         playerView.requestFocus()
         val movieId = intent.getStringExtra(EXTRA_MOVIE_ID) ?: return finish()
         val resume = intent.getBooleanExtra(EXTRA_RESUME, false)
@@ -109,7 +142,13 @@ class PlayerActivity : ComponentActivity() {
             }
             if (startPositionMs == C.TIME_UNSET) startPositionMs = if (resume) loaded.movie.playbackPositionMs else 0
             target = loaded
+            showInformation(loaded.movie)
             if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) startPlayer()
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                container.database.movies().observe(movieId).collect { current ->
+                    if (current != null) showInformation(current)
+                }
+            }
         }
     }
 
@@ -160,7 +199,10 @@ class PlayerActivity : ComponentActivity() {
             MediaItem.Builder()
                 .setUri(smbUri(target.config, target.movie.filePath))
                 .setMediaId(target.movie.id)
-                .setMediaMetadata(MediaMetadata.Builder().setTitle(target.movie.title).build())
+                .setMediaMetadata(MediaMetadata.Builder().setTitle(target.movie.title)
+                    .setDescription(target.movie.overview)
+                    .setArtworkUri(com.dineshdevkota.cinevault.core.Tmdb.imageUrl(target.movie.posterPath)?.let(Uri::parse))
+                    .build())
                 .build(),
             startPositionMs.coerceAtLeast(0),
         )
@@ -187,6 +229,14 @@ class PlayerActivity : ComponentActivity() {
         playerView.player = null
         exo.release()
         player = null
+    }
+
+    private fun showInformation(movie: MovieEntity) {
+        titleLabel.text = movie.title.ifBlank { movie.fileName }
+        val episode = movie.episodeInfo?.let { "${movie.seriesTitle ?: it.seriesTitle} · Season ${movie.seasonNumber ?: it.season} · Episode ${movie.episodeNumber ?: it.episode}" }
+        val facts = listOfNotNull(episode, movie.year?.toString(), movie.genres.takeIf { it.isNotEmpty() }?.joinToString(" · "),
+            movie.runtimeMinutes?.let { "$it min" }).joinToString(" · ")
+        detailLabel.text = listOf(facts, movie.overview.orEmpty()).filter { it.isNotBlank() }.joinToString("\n")
     }
 
     /** Persists the resume point, or marks the movie watched once playback passes the watched threshold. */

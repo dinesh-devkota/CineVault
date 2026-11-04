@@ -20,7 +20,7 @@ struct SourcesView: View {
                             Text(source.name)
                             Text("smb://\(source.host)/\(source.share)/\(source.rootPath)")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text("\(source.movies.count) movies · last scan \(source.lastScanDate?.formatted(date: .abbreviated, time: .shortened) ?? "never")")
+                            Text("\(source.movies.count) items · last scan \(source.lastScanDate?.formatted(date: .abbreviated, time: .shortened) ?? "never")")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -37,7 +37,7 @@ struct SourcesView: View {
                 .disabled(scanner.isScanning || sources.isEmpty)
         }
         .navigationTitle("Sources")
-        .sheet(isPresented: $adding) { NavigationStack { SourceEditorView(source: nil) } }
+        .sheet(isPresented: $adding) { NASSetupView() }
         .sheet(item: $editing) { source in NavigationStack { SourceEditorView(source: source) } }
     }
 }
@@ -70,6 +70,7 @@ struct SourceEditorView: View {
 
     var body: some View {
         Form {
+            Section { Button("Back") { dismiss() } }
             Section("Server") {
                 TextField("Name (e.g. Living Room NAS)", text: $name)
                 TextField("Host or IP (e.g. 192.168.1.20)", text: $host)
@@ -229,6 +230,11 @@ struct SettingsView: View {
                 }
             }
             #endif
+            Section("Help") {
+                NavigationLink("Media Guide & Help") {
+                    MediaGuideView()
+                }
+            }
             Section {
                 SecureField("TMDB API key or read access token", text: $apiKey)
                 Button("Save Key & Fetch Missing Metadata") {
@@ -255,7 +261,7 @@ struct SettingsView: View {
                 Text(message ?? "Get a free key at themoviedb.org → Settings → API. Posters and details are fetched automatically after each scan.")
             }
             Section("About") {
-                Text("CineVault plays MP4/M4V/MOV directly from your NAS over SMB. MKV/AVI files are listed but need to be remuxed to MP4 to play.")
+                Text("Cine-Media plays MP4/M4V/MOV directly from your NAS over SMB. Other video containers require conversion to a supported container and compatible codecs.")
                     .font(.caption)
                 Text("This product uses the TMDB API but is not endorsed or certified by TMDB.").font(.caption)
             }

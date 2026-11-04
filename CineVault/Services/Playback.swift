@@ -65,7 +65,7 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
             let size = try await sizeTask.value
             try Task.checkCancellation()
             if let info = request.contentInformationRequest {
-                info.contentType = VideoFile.contentType(path: path)
+                info.contentType = MediaFile.contentType(path: path)
                 info.contentLength = size
                 info.isByteRangeAccessSupported = true
             }
@@ -123,6 +123,7 @@ final class PlaybackController: ObservableObject {
     private var stopped = false
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var artworkTask: Task<Void, Never>?
 
     init?(movie: Movie, resume: Bool, services: PlaybackServices,
           sourceConfig: (MediaSource) throws -> SourceConfig = { try $0.config() }) throws {
@@ -156,18 +157,42 @@ final class PlaybackController: ObservableObject {
                 }
             }
         }
+        if let url = TMDB.imageURL(movie.posterPath, size: "w342") {
+            artworkTask = Task { [weak self, weak item] in
+                do {
+                    let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 15))
+                    try Task.checkCancellation()
+                    guard let self, !self.stopped, let item, self.player.currentItem === item,
+                          let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode),
+                          data.count <= 5 * 1024 * 1024, UIImage(data: data) != nil else { return }
+                    let artwork = AVMutableMetadataItem()
+                    artwork.identifier = .commonIdentifierArtwork
+                    artwork.value = data as NSData
+                    item.externalMetadata = Self.metadata(for: self.movie) + [artwork]
+                } catch {
+                    // Artwork is optional; the title and playback remain available offline.
+                }
+            }
+        }
     }
 
-    private static func metadata(for movie: Movie) -> [AVMetadataItem] {
+    static func metadata(for movie: Movie) -> [AVMetadataItem] {
         func item(_ id: AVMetadataIdentifier, _ value: String?) -> AVMetadataItem? {
-            guard let value else { return nil }
+            guard let value, !value.isEmpty else { return nil }
             let item = AVMutableMetadataItem()
             item.identifier = id
             item.value = value as NSString
             item.extendedLanguageTag = "und"
             return item
         }
-        return [item(.commonIdentifierTitle, movie.title), item(.commonIdentifierDescription, movie.overview)].compactMap { $0 }
+        let episode = movie.episodeInfo.map {
+            "\(movie.seriesTitle ?? $0.seriesTitle) · Season \(movie.seasonNumber ?? $0.season) · Episode \(movie.episodeNumber ?? $0.episode)"
+        }
+        let facts = [episode, movie.year.map(String.init), movie.genres.isEmpty ? nil : movie.genres.joined(separator: " · "),
+                     movie.runtimeMinutes.map { "\($0) min" }].compactMap { $0 }.joined(separator: " · ")
+        return [item(.commonIdentifierTitle, movie.title.isEmpty ? movie.fileName : movie.title),
+                item(.iTunesMetadataTrackSubTitle, facts),
+                item(.commonIdentifierDescription, movie.overview)].compactMap { $0 }
     }
 
     func record(time: Double) {
@@ -203,6 +228,8 @@ final class PlaybackController: ObservableObject {
         #endif
         record(time: player.currentTime().seconds)
         stopped = true
+        artworkTask?.cancel()
+        artworkTask = nil
         player.pause()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
@@ -214,10 +241,15 @@ final class PlaybackController: ObservableObject {
 
 struct PlaybackScreen: View {
     let controller: PlaybackController
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         #if CINEVAULT_COMMERCIAL
         CommercialPlayerView(session: controller.commercialSession)
+            .overlay(alignment: .topLeading) {
+                Button { controller.stop(); dismiss() } label: { Label("Back", systemImage: "chevron.left") }
+                    .buttonStyle(.bordered).padding(48)
+            }
         #else
         PlayerView(controller: controller)
         #endif
@@ -226,10 +258,17 @@ struct PlaybackScreen: View {
 
 struct PlayerView: UIViewControllerRepresentable {
     let controller: PlaybackController
+    @Environment(\.dismiss) private var dismiss
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let viewController = AVPlayerViewController()
         viewController.player = controller.player
+        viewController.transportBarCustomMenuItems = [
+            UIAction(title: "Back", image: UIImage(systemName: "chevron.left")) { _ in
+                controller.stop()
+                dismiss()
+            }
+        ]
         controller.player.play()
         return viewController
     }

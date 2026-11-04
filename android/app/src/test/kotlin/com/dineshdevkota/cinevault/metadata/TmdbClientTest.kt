@@ -115,4 +115,40 @@ class TmdbClientTest {
             TmdbClient.describe(IOException("failed", UnknownHostException("api.themoviedb.org"))),
         )
     }
+
+    @Test
+    fun tvSearchUsesFirstAirYearAndCachesSeriesAndSeasonRequests() = runBlocking {
+        val fake = FakeTmdb(
+            Reply(200, """{"results":[]}"""),
+            Reply(200, """{"results":[{"id":42,"name":"Example","first_air_date":"2022-01-01","poster_path":"/show.jpg"}]}"""),
+            Reply(200, """{"id":42,"name":"Example","first_air_date":"2022-01-01","episode_run_time":[45],"genres":[{"name":"Drama"}]}"""),
+            Reply(200, """{"season_number":0,"poster_path":"/season.jpg","episodes":[{"season_number":0,"episode_number":1,"name":"Special","runtime":30}]}"""),
+        )
+        val client = client(fake)
+        assertEquals(2022, client.searchTV("Example", 2021).single().year)
+        assertEquals(42, client.searchTV("Example", 2021).single().id)
+        assertEquals("Example", client.tvDetails(42).name)
+        assertEquals(2022, client.tvDetails(42).year)
+        assertEquals("Special", client.tvSeason(42, 0).episodes.single().name)
+        assertEquals("/season.jpg", client.tvSeason(42, 0).posterPath)
+        assertEquals(4, fake.urls.size)
+        assertEquals("/3/search/tv", fake.urls[0].encodedPath)
+        assertEquals("2021", fake.urls[0].queryParameter("first_air_date_year"))
+        assertNull(fake.urls[1].queryParameter("first_air_date_year"))
+        assertEquals("/3/tv/42", fake.urls[2].encodedPath)
+        assertEquals("/3/tv/42/season/0", fake.urls[3].encodedPath)
+    }
+
+    @Test
+    fun clearingTVCachesFetchesFreshDetails() = runBlocking {
+        val fake = FakeTmdb(
+            Reply(200, """{"id":42,"name":"Before"}"""),
+            Reply(200, """{"id":42,"name":"After"}"""),
+        )
+        val client = client(fake)
+        assertEquals("Before", client.tvDetails(42).name)
+        client.clearTVCache()
+        assertEquals("After", client.tvDetails(42).name)
+        assertEquals(2, fake.urls.size)
+    }
 }

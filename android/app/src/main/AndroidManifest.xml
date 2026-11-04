@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -29,6 +31,9 @@
         </activity>
         <activity
             android:name=".ui.MovieDetailActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ui.MediaGuideActivity"
             android:exported="false" />
         <activity
             android:name=".ui.NasSetupActivity"

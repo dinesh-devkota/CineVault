@@ -110,8 +110,9 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                 Modifier.weight(1f).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                OutlinedButton(onClick = onClose) { Text("Back") }
                 Text(
-                    "CINEVAULT  /  MOVIE",
+                    "CINE-MEDIA  /  ${current.mediaKind.label.uppercase(Locale.ROOT)}",
                     style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 3.sp),
                     color = Accent,
                 )
@@ -121,6 +122,10 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                current.episodeInfo?.let { episode ->
+                    Text("${current.seriesTitle ?: episode.seriesTitle} · Season ${current.seasonNumber ?: episode.season} · Episode ${current.episodeNumber ?: episode.episode}",
+                        style = MaterialTheme.typography.titleMedium, color = SecondaryText)
+                }
                 metadataLine(current).takeIf { it.isNotEmpty() }?.let {
                     Text(it, style = MaterialTheme.typography.titleMedium, color = SecondaryText)
                 }

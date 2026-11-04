@@ -4,6 +4,14 @@ import com.dineshdevkota.cinevault.core.Tmdb
 import com.dineshdevkota.cinevault.core.TmdbMovieDetails
 import com.dineshdevkota.cinevault.core.TmdbMovieSummary
 import com.dineshdevkota.cinevault.core.TmdbSearchResponse
+import com.dineshdevkota.cinevault.core.TmdbTVDetails
+import com.dineshdevkota.cinevault.core.TmdbTVSeason
+import com.dineshdevkota.cinevault.core.TmdbTVSearchResponse
+import com.dineshdevkota.cinevault.core.TitleMatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
@@ -22,6 +30,59 @@ class MetadataException(message: String, val isAuthFailure: Boolean = false) : E
 
 /** TMDB search and details with the user's key. Calls are cancellable; rate limits are retried briefly. */
 class TmdbClient(private val http: OkHttpClient, private val apiKey: () -> String) {
+    private val tvCacheLock = Mutex()
+    private var tvCacheKey: String? = null
+    private val tvSearchCache = mutableMapOf<Pair<String, Int?>, List<TmdbMovieSummary>>()
+    private val tvDetailsCache = mutableMapOf<Int, TmdbTVDetails>()
+    private val tvSeasonCache = mutableMapOf<Pair<Int, Int>, TmdbTVSeason>()
+
+    suspend fun clearTVCache() = tvCacheLock.withLock { resetTVCache() }
+
+    private fun resetTVCache() {
+        tvSearchCache.clear(); tvDetailsCache.clear(); tvSeasonCache.clear()
+        tvCacheKey = null
+    }
+
+    private fun prepareTVCache(key: String) {
+        if (key != tvCacheKey || tvSearchCache.size + tvDetailsCache.size + tvSeasonCache.size >= 512) resetTVCache()
+        tvCacheKey = key
+    }
+
+    /** Uses the existing title matcher with TV names and first-air dates. */
+    suspend fun searchTV(title: String, year: Int?): List<TmdbMovieSummary> = tvCacheLock.withLock {
+        val key = requireKey()
+        prepareTVCache(key)
+        val cacheKey = TitleMatcher.normalize(title) to year
+        tvSearchCache[cacheKey]?.let { return@withLock it }
+        var results = load(Tmdb.tvSearchRequest(title, year, key), TmdbTVSearchResponse.serializer()).results
+        if (results.isEmpty() && year != null) {
+            results = load(Tmdb.tvSearchRequest(title, null, key), TmdbTVSearchResponse.serializer()).results
+        }
+        currentCoroutineContext().ensureActive()
+        results.map { it.matchingCandidate() }.also { tvSearchCache[cacheKey] = it }
+    }
+
+    suspend fun tvDetails(id: Int): TmdbTVDetails = tvCacheLock.withLock {
+        val key = requireKey()
+        prepareTVCache(key)
+        tvDetailsCache[id]?.let { return@withLock it }
+        load(Tmdb.tvDetailsRequest(id, key), TmdbTVDetails.serializer()).also {
+            currentCoroutineContext().ensureActive()
+            tvDetailsCache[id] = it
+        }
+    }
+
+    suspend fun tvSeason(id: Int, season: Int): TmdbTVSeason = tvCacheLock.withLock {
+        require(season in 0..999)
+        val key = requireKey()
+        prepareTVCache(key)
+        val cacheKey = id to season
+        tvSeasonCache[cacheKey]?.let { return@withLock it }
+        load(Tmdb.tvSeasonRequest(id, season, key), TmdbTVSeason.serializer()).also {
+            currentCoroutineContext().ensureActive()
+            tvSeasonCache[cacheKey] = it
+        }
+    }
     /** Reads the sealed key; call off the main thread. */
     fun hasKey(): Boolean = apiKey().isNotEmpty()
 

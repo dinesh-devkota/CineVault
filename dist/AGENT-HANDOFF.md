@@ -311,3 +311,30 @@ restoration in a fresh task; publication remains a user action in environment se
 - The owner requested pushing this work to the development branch and adding
   the same NAS setup experience to Apple TV. No main merge or store upload was
   requested. Apple Developer membership remains unavailable.
+
+### Cine-Media library and playback update
+
+- Display name is now Cine-Media; app IDs and existing library data stay compatible.
+- Both platforms scan video and audio recursively, save discovered items in batches,
+  report progress, and mark absent items missing only after traversal completes.
+  Swift final-save failures restore missing flags and the previous scan date.
+- TV filenames (S01E02, 1x02, or numbered files in Season folders) produce local
+  show → season → episode browsing. TMDB TV endpoints provide show/season posters
+  and episode details/stills with cached lookups. Matched genres determine film
+  categories; audio remains Music. Room v3 adds nullable episode fields using
+  non-destructive migrations. SwiftData fields are additive and optional.
+- Added playback title/details and visible Back controls, manual TV matching, and
+  Settings → Media Guide & Help on Android and Apple TV. Read docs/MEDIA-GUIDE.md.
+- A read-only check of the owner's emulator confirmed the Media-root source
+  completed with 24,722 present items and a saved last-scan timestamp. A second
+  Movies-only source contains 503 overlapping items; neither source was removed.
+  No online title matches existed at this check. The owner must enter their own
+  free personal TMDB key in Settings; never request the key in chat.
+- Android core/app tests passed during development. Final APK installation,
+  focused runtime checks, and hosted Apple validation are tracked in the chat.
+  Do not run the entire Android instrumentation suite on the owner's emulator:
+  navigation tests clear app data. Use isolated CI for the full suite.
+- Prior development run 41875619174 exhausted GitHub macOS arm64 runner capacity;
+  no Apple job executed. Development validation now uses supported macos-15-intel
+  runners. Windows cannot compile or run tvOS locally; physical Apple TV testing
+  and signing remain outstanding until Apple account/device prerequisites exist.

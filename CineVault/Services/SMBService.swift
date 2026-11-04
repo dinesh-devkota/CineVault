@@ -7,6 +7,13 @@ struct RemoteFile: Sendable {
     let size: Int64
 }
 
+struct ScanProgress: Sendable {
+    let files: [RemoteFile]
+    let found: Int
+    let folders: Int
+}
+typealias MediaScanReporter = @MainActor @Sendable (ScanProgress) async throws -> Void
+
 enum SMBError: LocalizedError, Equatable {
     case invalidServer
     case invalidFileSize
@@ -114,13 +121,29 @@ actor SMBService {
     }
 
     func listShares(_ config: SourceConfig) async throws -> [String] {
+        try Task.checkCancellation()
         let credential = config.username.isEmpty ? nil
             : URLCredential(user: config.username, password: config.password, persistence: .forSession)
         guard let url = config.serverURL, let manager = SMB2Manager(url: url, credential: credential) else {
             throw SMBError.invalidServer
         }
         if let timeout { manager.timeout = timeout }
-        return try await manager.listShares().map { $0.name }
+        let shares = try await manager.listShares().map { $0.name }
+        try Task.checkCancellation()
+        return shares.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Lists direct child directories for setup without recursively scanning media.
+    func listFolders(_ config: SourceConfig) async throws -> [String] {
+        try await withManager(config) { manager in
+            let entries = try await manager.contentsOfDirectory(atPath: config.rootPath)
+            return entries.compactMap { entry -> String? in
+                guard (entry[.isDirectoryKey] as? Bool) == true,
+                      let name = entry[.nameKey] as? String,
+                      !name.isEmpty, name != ".", name != ".." else { return nil }
+                return name
+            }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        }
     }
 
     /// Recursively lists indexable video files below the source's root folder.
@@ -143,6 +166,41 @@ actor SMBService {
                         }
                     }
                 }
+            }
+            return results
+        }
+    }
+
+    /// Reports each directory/batch so large libraries become usable before traversal finishes.
+    func scanMedia(_ config: SourceConfig, onProgress: MediaScanReporter) async throws -> [RemoteFile] {
+        try await withManager(config) { manager in
+            var results: [RemoteFile] = []
+            var pending = [config.rootPath]
+            var folders = 0
+            while let dir = pending.popLast() {
+                try Task.checkCancellation()
+                let entries = try await manager.contentsOfDirectory(atPath: dir)
+                var batch: [RemoteFile] = []
+                for entry in entries {
+                    try Task.checkCancellation()
+                    guard let name = entry[.nameKey] as? String, name != ".", name != ".." else { continue }
+                    let path = (entry[.pathKey] as? String) ?? (dir as NSString).appendingPathComponent(name)
+                    if (entry[.isDirectoryKey] as? Bool) == true {
+                        if !MediaFile.shouldSkipDirectory(name: name) { pending.append(path) }
+                    } else {
+                        let size = (entry[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
+                        if MediaFile.shouldIndex(path: path, size: size) {
+                            let file = RemoteFile(path: path, size: size)
+                            results.append(file); batch.append(file)
+                            if batch.count >= 100 {
+                                try await onProgress(ScanProgress(files: batch, found: results.count, folders: folders))
+                                batch.removeAll()
+                            }
+                        }
+                    }
+                }
+                folders += 1
+                try await onProgress(ScanProgress(files: batch, found: results.count, folders: folders))
             }
             return results
         }

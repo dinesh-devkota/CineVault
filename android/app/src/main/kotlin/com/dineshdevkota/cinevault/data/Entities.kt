@@ -7,6 +7,11 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
 import com.dineshdevkota.cinevault.core.LibraryEntry
+import com.dineshdevkota.cinevault.core.EpisodeInfo
+import com.dineshdevkota.cinevault.core.EpisodeParser
+import com.dineshdevkota.cinevault.core.MediaFile
+import com.dineshdevkota.cinevault.core.MediaKind
+import com.dineshdevkota.cinevault.core.TitleMatcher
 import com.dineshdevkota.cinevault.core.WatchRules
 import com.dineshdevkota.cinevault.smb.SourceConfig
 import kotlinx.serialization.builtins.ListSerializer
@@ -65,6 +70,11 @@ data class MovieEntity(
     val overview: String? = null,
     val tagline: String? = null,
     val tmdbId: Int? = null,
+    val seriesTitle: String? = null,
+    val seriesTmdbId: Int? = null,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
+    val seasonPosterPath: String? = null,
     val posterPath: String? = null,
     val backdropPath: String? = null,
     override val genres: List<String> = emptyList(),
@@ -83,6 +93,26 @@ data class MovieEntity(
     override val isHidden: Boolean = false,
     override val isMissing: Boolean = false,
 ) : LibraryEntry {
+    val episodeInfo: EpisodeInfo?
+        get() {
+            if (MediaFile.isAudio(filePath)) return null
+            val local = EpisodeParser.parse(filePath)
+            val name = (seriesTitle ?: local?.seriesTitle)?.takeIf { it.isNotBlank() } ?: return null
+            val season = (seasonNumber ?: local?.season)?.takeIf { it in 0..999 } ?: return null
+            val episode = (episodeNumber ?: local?.episode)?.takeIf { it in 0..999 } ?: return null
+            return EpisodeInfo(name, season, episode, if (seriesTmdbId != null) year else local?.year)
+        }
+
+    val mediaKind: MediaKind
+        get() = MediaFile.kind(filePath, genres, matched = metadataFetched && tmdbId != null, isEpisode = episodeInfo != null)
+
+    val seriesKey: String?
+        get() {
+            val info = episodeInfo ?: return null
+            return seriesTmdbId?.let { "tmdb:$it" }
+                ?: "local:${TitleMatcher.normalize(info.seriesTitle)}|${info.year ?: ""}"
+        }
+
     val progress: Float
         get() = if (durationMs > 0) (playbackPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 

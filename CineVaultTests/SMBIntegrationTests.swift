@@ -4,6 +4,33 @@ import XCTest
 @testable import CineVault
 
 final class SMBIntegrationTests: XCTestCase {
+    func testSetupListsSharesAndDirectChildFolders() async throws {
+        let config = configuration()
+        let service = SMBService(timeout: 5)
+        let shares = try await service.listShares(config)
+        XCTAssertTrue(shares.contains("CINEVAULT"))
+        XCTAssertFalse(shares.contains("IPC$"))
+        let folders = try await service.listFolders(config)
+        XCTAssertTrue(folders.contains("Feature (2020)"))
+        XCTAssertFalse(folders.contains("Too Small.mp4"))
+        await service.reset(config)
+    }
+
+    @MainActor
+    func testMediaScanReportsIncrementalFilesAndIncludesShortVideos() async throws {
+        let config = configuration()
+        let service = SMBService(timeout: 5)
+        var reported: [String] = []
+        let files = try await service.scanMedia(config) { progress in
+            reported.append(contentsOf: progress.files.map(\.path))
+        }
+        XCTAssertEqual(Set(files.map(\.path)), Set(reported))
+        XCTAssertTrue(files.contains { $0.path.hasSuffix("Too Small.mp4") })
+        XCTAssertTrue(files.contains { $0.path.hasSuffix("Feature (2020).mp4") })
+        XCTAssertFalse(files.contains { $0.path.contains("Extras/") || $0.path.contains("@eaDir/") })
+        await service.reset(config)
+    }
+
     private actor ReadGate {
         private(set) var attempts = 0
         private var released = false

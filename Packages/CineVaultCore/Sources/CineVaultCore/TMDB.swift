@@ -72,6 +72,20 @@ public enum TMDB {
         request(path: "/movie/\(id)", apiKey: apiKey)
     }
 
+    public static func tvSearchRequest(title: String, year: Int?, apiKey: String) -> URLRequest {
+        var query = ["query": title, "include_adult": "false"]
+        if let year { query["first_air_date_year"] = String(year) }
+        return request(path: "/search/tv", query: query, apiKey: apiKey)
+    }
+
+    public static func tvDetailsRequest(id: Int, apiKey: String) -> URLRequest {
+        request(path: "/tv/\(id)", apiKey: apiKey)
+    }
+
+    public static func tvSeasonRequest(id: Int, season: Int, apiKey: String) -> URLRequest {
+        request(path: "/tv/\(id)/season/\(season)", apiKey: apiKey)
+    }
+
     public static func imageURL(_ path: String?, size: String = "w500") -> URL? {
         guard let path, !path.isEmpty else { return nil }
         return URL(string: "https://image.tmdb.org/t/p/\(size)\(path)")

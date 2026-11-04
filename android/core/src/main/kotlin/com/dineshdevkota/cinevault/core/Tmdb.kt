@@ -73,6 +73,15 @@ object Tmdb {
 
     fun detailsRequest(id: Int, apiKey: String): Request = request("/movie/$id", apiKey = apiKey)
 
+    fun tvSearchRequest(title: String, year: Int?, apiKey: String): Request {
+        val query = mutableMapOf("query" to title, "include_adult" to "false")
+        if (year != null) query["first_air_date_year"] = year.toString()
+        return request("/search/tv", query, apiKey)
+    }
+
+    fun tvDetailsRequest(id: Int, apiKey: String): Request = request("/tv/$id", apiKey = apiKey)
+    fun tvSeasonRequest(id: Int, season: Int, apiKey: String): Request = request("/tv/$id/season/$season", apiKey = apiKey)
+
     fun imageUrl(path: String?, size: String = "w500"): String? =
         path?.takeIf { it.isNotEmpty() }?.let { "https://image.tmdb.org/t/p/$size$it" }
 }

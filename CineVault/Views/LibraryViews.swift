@@ -91,6 +91,7 @@ enum LibrarySearch {
 }
 
 struct LibraryView: View {
+    @State private var kind: MediaKind = .movie
     @Query private var movies: [Movie]
     @Query(sort: \MediaSource.name) private var sources: [MediaSource]
     @StateObject private var preferences = LibraryPreferences()
@@ -117,7 +118,7 @@ struct LibraryView: View {
     }
 
     private var visible: [Movie] {
-        LibraryQuery.visible(movies, sort: preferences.sort, filter: preferences.filter,
+        LibraryQuery.visible(movies.filter { $0.mediaKind == kind }, sort: preferences.sort, filter: preferences.filter,
                              genre: preferences.genre.isEmpty ? nil : preferences.genre, sourceID: selectedSourceID,
                              decade: preferences.decade == 0 ? nil : preferences.decade)
     }
@@ -131,10 +132,10 @@ struct LibraryView: View {
                             .font(.system(size: 18, weight: .semibold))
                             .tracking(3)
                             .foregroundStyle(CinemaTheme.accent)
-                        Text("Movies").font(.system(size: 62, weight: .bold))
+                        Text(kind.label).font(.system(size: 62, weight: .bold))
                     }
                     Spacer()
-                    Text("\(visible.count) titles")
+                    Text(kind == .tvShow ? "\(visible.count) episodes" : "\(visible.count) titles")
                         .font(.callout)
                         .foregroundStyle(CinemaTheme.secondaryText)
                 }
@@ -164,18 +165,23 @@ struct LibraryView: View {
                         Text("All Decades").tag(0)
                         ForEach(decades, id: \.self) { Text("\($0)s").tag($0) }
                     }
+                    Picker("Section", selection: $kind) {
+                        ForEach(MediaKind.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
                     Spacer()
                 }
                 .pickerStyle(.menu)
 
-                if movies.isEmpty {
-                    ContentUnavailableView("No movies yet", systemImage: "film",
-                                           description: Text("Add your NAS in the Sources tab."))
+                if !movies.contains(where: { $0.mediaKind == kind }) {
+                    ContentUnavailableView("No \(kind.label.lowercased()) yet", systemImage: kind == .music ? "music.note" : "film",
+                                           description: Text("Add the parent media folder in Sources. Its subfolders are scanned automatically."))
                         .padding(.top, 100)
                 } else if visible.isEmpty {
                     ContentUnavailableView("No matching movies", systemImage: "line.3.horizontal.decrease.circle",
                                            description: Text("Try another filter, source, decade or genre."))
                         .padding(.top, 100)
+                } else if kind == .tvShow {
+                    TVShowBrowserView(episodes: visible)
                 } else {
                     PosterGrid(movies: visible)
                 }
@@ -184,6 +190,9 @@ struct LibraryView: View {
             .padding(.bottom, 100)
         }
         .background(CinemaBackground())
+        .onChange(of: kind) { _, _ in
+            preferences.genre = ""; preferences.decade = 0; preferences.filter = .all
+        }
         .onChange(of: sources.map(\.id)) { previousIDs, _ in
             preferences.sourcesChanged(from: previousIDs, to: sources)
         }
@@ -196,11 +205,11 @@ struct HomeView: View {
 
     private var available: [Movie] { movies.filter { !$0.isHidden && !$0.isMissing } }
     private var continuing: [Movie] {
-        available.filter(\.isInProgress)
+        available.filter { $0.isInProgress && $0.mediaKind != .music }
             .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
     }
     private var featured: Movie? {
-        let unwatched = available.filter { !$0.isInProgress && !$0.isWatched }
+        let unwatched = available.filter { !$0.isInProgress && !$0.isWatched && $0.mediaKind != .music }
         return unwatched.first { $0.backdropPath != nil } ?? unwatched.first ?? available.first
     }
 
@@ -213,7 +222,7 @@ struct HomeView: View {
                             .font(.system(size: 18, weight: .semibold))
                             .tracking(3)
                             .foregroundStyle(CinemaTheme.accent)
-                        Text("Welcome to CineVault")
+                        Text("Welcome to Cine-Media")
                             .font(.system(size: 54, weight: .bold))
                     }
                     Spacer()
@@ -235,7 +244,13 @@ struct HomeView: View {
                     if let featured {
                         FeaturedMovieCard(movie: featured)
                     }
-                    PosterRow(title: "Recently Added", movies: Array(available.prefix(20)))
+                    ForEach(MediaKind.allCases, id: \.self) { kind in
+                        let collection = available.filter { $0.mediaKind == kind }
+                        if !collection.isEmpty {
+                            if kind == .tvShow { TVShowRow(episodes: collection) }
+                            else { PosterRow(title: kind.label, movies: Array(collection.prefix(20))) }
+                        }
+                    }
                     PosterRow(title: "Unwatched", movies: Array(available.filter { !$0.isWatched }.prefix(20)))
                 }
             }

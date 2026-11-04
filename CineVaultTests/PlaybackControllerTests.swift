@@ -4,6 +4,28 @@ import XCTest
 
 @MainActor
 final class PlaybackControllerTests: XCTestCase {
+    func testPlaybackMetadataIdentifiesEpisodeAndUsesAvailableDetails() throws {
+        let movie = makeMovie()
+        movie.filePath = "TV Shows/Example Show (2020)/Season 02/Example.S02E03.mp4"
+        movie.setTitle("The Return")
+        movie.year = 2021
+        movie.genres = ["Drama"]
+        movie.runtimeMinutes = 42
+        movie.overview = "A journey home."
+        let metadata = PlaybackController.metadata(for: movie)
+        XCTAssertEqual(metadata.first { $0.identifier == .commonIdentifierTitle }?.stringValue, "The Return")
+        let subtitle = try XCTUnwrap(metadata.first { $0.identifier == .iTunesMetadataTrackSubTitle }?.stringValue)
+        XCTAssertTrue(subtitle.contains("Example Show · Season 2 · Episode 3"))
+        XCTAssertTrue(subtitle.contains("2021 · Drama · 42 min"))
+        XCTAssertEqual(metadata.first { $0.identifier == .commonIdentifierDescription }?.stringValue, "A journey home.")
+    }
+
+    func testPlaybackWithoutOnlineMetadataStillHasFileName() {
+        let movie = makeMovie()
+        let metadata = PlaybackController.metadata(for: movie)
+        XCTAssertEqual(metadata.first { $0.identifier == .commonIdentifierTitle }?.stringValue, "Movie.mp4")
+    }
+
     func testReplayingWatchedMovieRestoresResume() throws {
         let services = PlaybackServices()
         let movie = makeMovie()

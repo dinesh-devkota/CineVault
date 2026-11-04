@@ -2,6 +2,8 @@ package com.dineshdevkota.cinevault.metadata
 
 import androidx.room.withTransaction
 import com.dineshdevkota.cinevault.core.MovieEdits
+import com.dineshdevkota.cinevault.core.MediaFile
+import com.dineshdevkota.cinevault.core.EpisodeInfo
 import com.dineshdevkota.cinevault.core.TitleMatcher
 import com.dineshdevkota.cinevault.core.WatchRules
 import com.dineshdevkota.cinevault.data.CineVaultDatabase
@@ -62,14 +64,14 @@ class MetadataService(private val database: CineVaultDatabase, val tmdb: TmdbCli
         try {
             return batchLock.withLock {
                 val movies = database.movies()
-                if (refreshAll) movies.clearMetadataFetched()
-                val pending = movies.needingMetadata()
+                if (refreshAll) { movies.clearMetadataFetched(); tmdb.clearTVCache() }
+                val pending = movies.available().filter { needsMetadata(it) && !MediaFile.isAudio(it.filePath) }
                 var failed = 0
                 var firstError: String? = null
                 for ((index, queued) in pending.withIndex()) {
                     statusFlow.value = "Fetching metadata ${index + 1} of ${pending.size}…"
                     // Re-read so a fix or reset made on the Edit screen during a long batch is not undone.
-                    val movie = movies.get(queued.id)?.takeIf { !it.metadataFetched && !it.isMissing } ?: continue
+                    val movie = movies.get(queued.id)?.takeIf { needsMetadata(it) && !it.isMissing } ?: continue
                     try {
                         match(movie)
                     } catch (e: CancellationException) {
@@ -99,17 +101,70 @@ class MetadataService(private val database: CineVaultDatabase, val tmdb: TmdbCli
 
     /** Uses a {tmdb-123} tag or an earlier match when present, otherwise a title/year search. */
     suspend fun match(movie: MovieEntity) = mutationLock.withLock {
-        val current = database.movies().get(movie.id)?.takeIf { !it.metadataFetched && !it.isMissing }
+        val current = database.movies().get(movie.id)?.takeIf { needsMetadata(it) && !it.isMissing }
             ?: return@withLock
         matchLocked(current)
     }
 
     private suspend fun matchLocked(movie: MovieEntity) {
+        if (MediaFile.isAudio(movie.filePath)) return
+        movie.episodeInfo?.let { return matchTVLocked(movie, it) }
         movie.tmdbId?.let { return applyLocked(it, movie.id) }
         val title = if (movie.isLocked) movie.title else movie.parsedTitle
         val year = if (movie.isLocked) movie.year else movie.parsedYear
         val best = title.takeIf { it.isNotBlank() }?.let { TitleMatcher.bestMatch(it, year, tmdb.search(it, year)) }
         if (best != null) applyLocked(best.id, movie.id) else database.movies().markMetadataFetched(movie.id)
+    }
+
+    private fun needsMetadata(movie: MovieEntity): Boolean = !movie.metadataFetched ||
+        (!movie.isLocked && movie.seriesTitle == null && movie.episodeInfo != null)
+
+    private suspend fun matchTVLocked(movie: MovieEntity, info: EpisodeInfo) {
+        val id = movie.seriesTmdbId ?: TitleMatcher.bestMatch(info.seriesTitle, info.year,
+            tmdb.searchTV(info.seriesTitle, info.year))?.id
+        if (id != null) {
+            applyTVLocked(id, movie, info)
+        } else {
+            database.withTransaction {
+                val current = database.movies().get(movie.id) ?: return@withTransaction
+                if (sameMatch(current, movie)) {
+                    database.movies().rememberEpisode(movie.id, info.seriesTitle, info.season, info.episode)
+                }
+            }
+        }
+    }
+
+    private fun sameMatch(current: MovieEntity, original: MovieEntity): Boolean =
+        current.title == original.title && current.year == original.year && current.isLocked == original.isLocked &&
+            current.tmdbId == original.tmdbId && current.seriesTmdbId == original.seriesTmdbId &&
+            current.episodeInfo == original.episodeInfo && !current.isMissing
+
+    suspend fun applyTV(seriesId: Int, movieId: String, force: Boolean = false) = mutationLock.withLock {
+        val movie = database.movies().get(movieId) ?: return@withLock
+        val info = movie.episodeInfo ?: return@withLock
+        applyTVLocked(seriesId, movie, info, force)
+    }
+
+    private suspend fun applyTVLocked(seriesId: Int, movie: MovieEntity, info: EpisodeInfo, force: Boolean = false) {
+        val details = tmdb.tvDetails(seriesId)
+        val season = tmdb.tvSeason(seriesId, info.season)
+        val episode = season.episodes.firstOrNull { it.seasonNumber == info.season && it.episodeNumber == info.episode }
+        database.withTransaction {
+            val movies = database.movies()
+            val current = movies.get(movie.id) ?: return@withTransaction
+            if (!sameMatch(current, movie)) return@withTransaction
+            movies.applyTVMetadata(
+                id = movie.id, seriesTitle = details.name.ifBlank { info.seriesTitle }, seriesTmdbId = details.id,
+                seasonNumber = info.season, episodeNumber = info.episode, seasonPosterPath = season.posterPath,
+                overview = episode?.overview?.takeIf { it.isNotBlank() } ?: details.overview,
+                runtimeMinutes = episode?.runtime ?: details.episodeRunTime.firstOrNull { it > 0 },
+                rating = episode?.voteAverage ?: details.voteAverage, posterPath = details.posterPath,
+                backdropPath = episode?.stillPath ?: details.backdropPath, genresJson = converters.fromList(details.genres.orEmpty().map { it.name }),
+            )
+            val title = episode?.name?.takeIf { it.isNotBlank() } ?: movie.title
+            movies.applyMatchedTitle(movie.id, title, WatchRules.sortTitle(title), details.year ?: info.year, force)
+            if (force) movies.lock(movie.id)
+        }
     }
 
     /** Stores TMDB details; [force] (manual re-match) also replaces a title the user locked. */

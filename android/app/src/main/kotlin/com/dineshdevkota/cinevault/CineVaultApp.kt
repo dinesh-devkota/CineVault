@@ -45,7 +45,8 @@ class AppContainer(context: Context) {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
     val metadata = MetadataService(database, TmdbClient(http) { settings.tmdbApiKey })
-    val scanner = LibraryScanner(database, secrets, smb::scanVideos, afterScan = { metadata.fetchMissing()?.failureMessage })
+    val scanner = LibraryScanner(database, secrets, smb::scanVideos,
+        afterScan = { metadata.fetchMissing()?.failureMessage }, scanWithProgress = smb::scanMedia)
     val editor = LibraryEditor(database, metadata, playbackProgress)
 }
 

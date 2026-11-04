@@ -54,7 +54,31 @@ class WatchlistMigrationTest {
         assertEquals(legacy.movie, movie)
         assertEquals("fixture-only", source.config(SecretBox()).password)
         assertFalse("Existing movies must start outside the watchlist", movie.isWatchlisted)
-        assertEquals(2, db.openHelper.readableDatabase.version)
+        assertEquals(3, db.openHelper.readableDatabase.version)
+    }
+
+    @Test
+    fun versionTwoUpgradePreservesWatchlistAndPlaybackWhileAddingTVColumns() = runBlocking {
+        val legacy = createVersionOneDatabase()
+        SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).path, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("ALTER TABLE movies ADD COLUMN isWatchlisted INTEGER NOT NULL DEFAULT 0")
+            it.execSQL("UPDATE movies SET isWatchlisted = 1")
+            it.version = 2
+        }
+        val db = openDatabase()
+        val movie = requireNotNull(db.movies().get(legacy.movie.id))
+        assertEquals(legacy.movie.copy(isWatchlisted = true), movie)
+        assertEquals(legacy.source, db.sources().get(legacy.source.id))
+        assertEquals(3, db.openHelper.readableDatabase.version)
+        db.movies().applyTVMetadata(movie.id, "Example", 42, 0, 1, "/season.jpg", "Episode", 40, 8.0,
+            "/series.jpg", "/backdrop.jpg", "[\"Drama\"]")
+        val updated = requireNotNull(db.movies().get(movie.id))
+        assertEquals(42, updated.seriesTmdbId)
+        assertEquals(0, updated.seasonNumber)
+        assertEquals(movie.playbackPositionMs, updated.playbackPositionMs)
+        assertEquals(movie.isWatched, updated.isWatched)
+        assertEquals(movie.isWatchlisted, updated.isWatchlisted)
+        assertEquals(movie.isLocked, updated.isLocked)
     }
 
     @Test

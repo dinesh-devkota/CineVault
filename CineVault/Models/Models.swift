@@ -60,6 +60,24 @@ struct SourceConfig: Sendable, Hashable {
 
 @Model
 final class Movie {
+    var mediaKind: MediaKind {
+        MediaFile.kind(path: filePath, genres: genres, matched: metadataFetched && tmdbID != nil,
+                       isEpisode: episodeInfo != nil)
+    }
+    var episodeInfo: EpisodeInfo? {
+        guard !MediaFile.isAudio(path: filePath) else { return nil }
+        let local = EpisodeParser.parse(path: filePath)
+        guard let name = seriesTitle ?? local?.seriesTitle, !name.isEmpty,
+              let season = seasonNumber ?? local?.season, let episode = episodeNumber ?? local?.episode,
+              (0...999).contains(season), (0...999).contains(episode) else { return nil }
+        return EpisodeInfo(seriesTitle: name, season: season, episode: episode,
+                           year: seriesTMDBID != nil ? year : local?.year)
+    }
+    var seriesKey: String? {
+        guard let info = episodeInfo else { return nil }
+        if let seriesTMDBID { return "tmdb:\(seriesTMDBID)" }
+        return "local:\(TitleMatcher.normalize(info.seriesTitle))|\(info.year.map(String.init) ?? "")"
+    }
     var id: UUID = UUID()
     var filePath: String = ""
     var fileName: String = ""
@@ -73,6 +91,11 @@ final class Movie {
     var overview: String?
     var tagline: String?
     var tmdbID: Int?
+    var seriesTitle: String?
+    var seriesTMDBID: Int?
+    var seasonNumber: Int?
+    var episodeNumber: Int?
+    var seasonPosterPath: String?
     var posterPath: String?
     var backdropPath: String?
     var genres: [String] = []
@@ -119,6 +142,11 @@ final class Movie {
         parsedYear = parsed.year
         isLocked = false
         tmdbID = parsed.tmdbID
+        seriesTitle = nil
+        seriesTMDBID = nil
+        seasonNumber = nil
+        episodeNumber = nil
+        seasonPosterPath = nil
         setTitle(parsedTitle.isEmpty ? fileName : parsedTitle)
         year = parsedYear
         overview = nil

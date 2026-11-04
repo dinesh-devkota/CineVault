@@ -7,6 +7,7 @@ import CineVaultCommercial
 
 struct MovieDetailView: View {
     @Bindable var movie: Movie
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var playbackServices: PlaybackServices
     @State private var playback: PlaybackController?
     @State private var editing = false
@@ -36,13 +37,19 @@ struct MovieDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    Text("CINEVAULT  /  MOVIE")
+                    Button { dismiss() } label: { Label("Back", systemImage: "chevron.left") }
+                        .buttonStyle(.bordered)
+                    Text("CINE-MEDIA  /  \(movie.mediaKind.label.uppercased())")
                         .font(.system(size: 18, weight: .semibold))
                         .tracking(3)
                         .foregroundStyle(CinemaTheme.accent)
                     Text(movie.title)
                         .font(.system(size: 72, weight: .bold))
                         .lineLimit(2)
+                    if let episode = movie.episodeInfo {
+                        Text("\(movie.seriesTitle ?? episode.seriesTitle) · Season \(movie.seasonNumber ?? episode.season) · Episode \(movie.episodeNumber ?? episode.episode)")
+                            .font(.title3).foregroundStyle(CinemaTheme.secondaryText)
+                    }
                     Text(MoviePresentation.metadata(for: movie))
                         .font(.title3)
                         .foregroundStyle(CinemaTheme.secondaryText)
@@ -194,7 +201,7 @@ struct MovieDetailView: View {
     }
 
     private func play(resume: Bool) {
-        guard VideoFile.isNativelyPlayable(path: movie.filePath) else {
+        guard MediaFile.isPlayable(path: movie.filePath) else {
             unsupported = true
             return
         }
@@ -226,6 +233,7 @@ struct EditMovieView: View {
 
     var body: some View {
         Form {
+            Section { Button("Back") { dismiss() } }
             Section("Details") {
                 TextField("Title", text: $title)
                 TextField("Year", text: $year).keyboardType(.numberPad)
@@ -295,7 +303,7 @@ struct EditMovieView: View {
         .onAppear {
             title = movie.title
             year = movie.year.map(String.init) ?? ""
-            query = movie.title
+            query = movie.seriesTitle ?? movie.episodeInfo?.seriesTitle ?? movie.title
         }
     }
 
@@ -306,7 +314,11 @@ struct EditMovieView: View {
                     message = "Add a TMDB key in Settings first."
                     return
                 }
-                results = try await MetadataService.shared.search(title: query, year: nil)
+                results = if movie.episodeInfo != nil {
+                    try await MetadataService.shared.searchTV(title: query, year: nil)
+                } else {
+                    try await MetadataService.shared.search(title: query, year: nil)
+                }
                 message = results.isEmpty ? "No results." : nil
             } catch {
                 message = error.localizedDescription
@@ -317,7 +329,13 @@ struct EditMovieView: View {
     private func rematch(_ result: TMDBMovieSummary) {
         Task {
             do {
-                guard try await MetadataService.shared.apply(tmdbID: result.id, to: movie, force: true) else { return }
+                let applied: Bool
+                if movie.episodeInfo != nil {
+                    applied = try await MetadataService.shared.applyTV(seriesID: result.id, to: movie, force: true)
+                } else {
+                    applied = try await MetadataService.shared.apply(tmdbID: result.id, to: movie, force: true)
+                }
+                guard applied else { return }
                 try movie.modelContext?.save()
                 dismiss()
             } catch {

@@ -11,7 +11,10 @@ struct CineVaultApp: App {
         WindowGroup {
             Group {
                 #if DEBUG
-                if DesignPreview.isEnabled {
+                if ProcessInfo.processInfo.arguments.contains("--ui-preview-nas") {
+                    NASSetupView().environmentObject(scanner)
+                        .modelContainer(for: [MediaSource.self, Movie.self], inMemory: true)
+                } else if DesignPreview.isEnabled {
                     DesignPreview()
                         .environmentObject(scanner)
                 } else {
@@ -39,7 +42,7 @@ struct RootView: View {
     var body: some View {
         TabView {
             NavigationStack { HomeView().movieDestination() }.tabItem { Text("Home") }
-            NavigationStack { LibraryView().movieDestination() }.tabItem { Text("Movies") }
+            NavigationStack { LibraryView().movieDestination() }.tabItem { Text("Library") }
             NavigationStack { SearchView().movieDestination() }.tabItem { Image(systemName: "magnifyingglass") }
             NavigationStack { SourcesView() }.tabItem { Text("Sources") }
             NavigationStack { SettingsView() }.tabItem { Image(systemName: "gearshape") }

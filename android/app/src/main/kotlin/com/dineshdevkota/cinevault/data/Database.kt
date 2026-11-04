@@ -38,6 +38,9 @@ interface SourceDao {
 
 @Dao
 interface MovieDao {
+    @Query("SELECT * FROM movies WHERE sourceId = :sourceId AND filePath IN (:paths)")
+    suspend fun forPaths(sourceId: String, paths: List<String>): List<MovieEntity>
+
     @Query("SELECT * FROM movies")
     fun observeAll(): Flow<List<MovieEntity>>
 
@@ -52,6 +55,9 @@ interface MovieDao {
 
     @Query("SELECT * FROM movies WHERE metadataFetched = 0 AND isMissing = 0")
     suspend fun needingMetadata(): List<MovieEntity>
+
+    @Query("SELECT * FROM movies WHERE isMissing = 0")
+    suspend fun available(): List<MovieEntity>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(movie: MovieEntity)
@@ -111,6 +117,24 @@ interface MovieDao {
         genresJson: String,
     )
 
+    /** TV IDs have a separate namespace; only local episode rows receive these details. */
+    @Query(
+        "UPDATE movies SET tmdbId = NULL, seriesTitle = :seriesTitle, seriesTmdbId = :seriesTmdbId, " +
+            "seasonNumber = :seasonNumber, episodeNumber = :episodeNumber, seasonPosterPath = :seasonPosterPath, " +
+            "overview = :overview, tagline = NULL, runtimeMinutes = :runtimeMinutes, rating = :rating, " +
+            "posterPath = :posterPath, backdropPath = :backdropPath, genres = :genresJson, metadataFetched = 1 WHERE id = :id",
+    )
+    suspend fun applyTVMetadata(
+        id: String, seriesTitle: String, seriesTmdbId: Int, seasonNumber: Int, episodeNumber: Int,
+        seasonPosterPath: String?, overview: String?, runtimeMinutes: Int?, rating: Double?,
+        posterPath: String?, backdropPath: String?, genresJson: String,
+    )
+
+    @Query("UPDATE movies SET seriesTitle = :seriesTitle, seasonNumber = :season, episodeNumber = :episode, " +
+        "tmdbId = NULL, overview = NULL, tagline = NULL, posterPath = NULL, backdropPath = NULL, " +
+        "runtimeMinutes = NULL, rating = NULL, genres = '[]', metadataFetched = 1 WHERE id = :id")
+    suspend fun rememberEpisode(id: String, seriesTitle: String, season: Int, episode: Int)
+
     /** Takes TMDB's title and year unless the user locked the title; a manual re-match ([force]) always does. */
     @Query(
         "UPDATE movies SET title = :title, sortTitle = :sortTitle, year = COALESCE(:year, year) " +
@@ -135,12 +159,13 @@ interface MovieDao {
     @Query(
         "UPDATE movies SET title = :title, sortTitle = :sortTitle, year = :year, tmdbId = :tmdbId, isLocked = 0, " +
             "metadataFetched = 0, overview = NULL, tagline = NULL, runtimeMinutes = NULL, rating = NULL, " +
-            "posterPath = NULL, backdropPath = NULL, genres = :noGenresJson WHERE id = :id",
+            "posterPath = NULL, backdropPath = NULL, genres = :noGenresJson, seriesTitle = NULL, seriesTmdbId = NULL, " +
+            "seasonNumber = NULL, episodeNumber = NULL, seasonPosterPath = NULL WHERE id = :id",
     )
     suspend fun resetToFile(id: String, title: String, sortTitle: String, year: Int?, tmdbId: Int?, noGenresJson: String)
 }
 
-@Database(entities = [SourceEntity::class, MovieEntity::class], version = 2, exportSchema = false)
+@Database(entities = [SourceEntity::class, MovieEntity::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class CineVaultDatabase : RoomDatabase() {
     abstract fun sources(): SourceDao
@@ -153,9 +178,19 @@ abstract class CineVaultDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE movies ADD COLUMN seriesTitle TEXT")
+                db.execSQL("ALTER TABLE movies ADD COLUMN seriesTmdbId INTEGER")
+                db.execSQL("ALTER TABLE movies ADD COLUMN seasonNumber INTEGER")
+                db.execSQL("ALTER TABLE movies ADD COLUMN episodeNumber INTEGER")
+                db.execSQL("ALTER TABLE movies ADD COLUMN seasonPosterPath TEXT")
+            }
+        }
+
         fun create(context: Context, name: String = "cinevault.db"): CineVaultDatabase =
             Room.databaseBuilder(context, CineVaultDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

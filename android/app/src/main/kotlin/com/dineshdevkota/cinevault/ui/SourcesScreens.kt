@@ -89,7 +89,7 @@ private fun SourceRow(source: SourceEntity, count: Int, scanning: Boolean, onSca
             Text(source.name, style = MaterialTheme.typography.titleMedium)
             Text(sourceUrl(source), style = MaterialTheme.typography.bodyMedium, color = SecondaryText)
             Text(
-                "$count movies · last scan ${source.lastScanAt?.let(::formatDate) ?: "never"}",
+                "$count items · last scan ${source.lastScanAt?.let(::formatDate) ?: "never"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = SecondaryText,
             )
@@ -104,7 +104,8 @@ fun sourceUrl(source: SourceEntity): String =
 
 @Composable
 fun SettingsTab() {
-    val container = LocalContext.current.container
+    val context = LocalContext.current
+    val container = context.container
     val settings = container.settings
     val metadata = container.metadata
     val scope = rememberCoroutineScope()
@@ -132,6 +133,11 @@ fun SettingsTab() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item { ScreenHeader("Settings") }
+        item {
+            OutlinedButton(onClick = { MediaGuideActivity.start(context) }) {
+                Text("Media Guide & Help")
+            }
+        }
         item { Text("Metadata (themoviedb.org)", style = MaterialTheme.typography.titleLarge) }
         item {
             if (!keyLoaded) Text("Loading saved key…", color = SecondaryText)
@@ -192,7 +198,7 @@ fun SettingsTab() {
         item { Text("About", style = MaterialTheme.typography.titleLarge) }
         item {
             Text(
-                "CineVault streams MP4, MKV, WebM, AVI, TS and more directly from your NAS over SMB. " +
+                "Cine-Media streams MP4, MKV, WebM, AVI, TS and more directly from your NAS over SMB. " +
                     "Which video and audio codecs play depends on your TV device.",
                 color = SecondaryText,
             )

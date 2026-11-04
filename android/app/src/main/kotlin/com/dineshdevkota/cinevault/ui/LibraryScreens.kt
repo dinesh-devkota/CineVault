@@ -56,12 +56,13 @@ import androidx.tv.material3.TabRow
 import androidx.tv.material3.Text
 import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.core.LibraryFilter
+import com.dineshdevkota.cinevault.core.MediaKind
 import com.dineshdevkota.cinevault.core.LibraryQuery
 import com.dineshdevkota.cinevault.core.LibrarySort
 import com.dineshdevkota.cinevault.core.Tmdb
 import com.dineshdevkota.cinevault.data.MovieEntity
 
-private val tabs = listOf("Home", "Movies", "Search", "Sources", "Settings")
+private val tabs = listOf("Home", "Library", "Search", "Sources", "Settings")
 
 @Composable
 fun RootScreen() {
@@ -133,20 +134,28 @@ fun RootScreen() {
 @Composable
 private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
     val context = LocalContext.current
+    var selectedShowId by rememberSaveable { mutableStateOf<String?>(null) }
     val status by LocalContext.current.container.scanner.status.collectAsStateWithLifecycle()
     val available = remember(movies) { movies.filter { !it.isHidden && !it.isMissing }.sortedByDescending { it.addedAt } }
-    val continuing = remember(movies) { LibraryQuery.continueWatching(movies).take(20) }
+    val collections = remember(available) { available.groupBy { it.mediaKind } }
+    val continuing = remember(movies) { LibraryQuery.continueWatching(movies).filter { it.mediaKind != MediaKind.MUSIC }.take(20) }
     val watchlist = remember(movies) { LibraryQuery.watchlist(movies).take(20) }
     val unwatched = remember(available) { available.filter { !it.isWatched }.take(20) }
     val featured = remember(available) {
-        val fresh = available.filter { !it.isWatched && !it.isInProgress }
+        val fresh = available.filter { !it.isWatched && !it.isInProgress && it.mediaKind != MediaKind.MUSIC }
         fresh.firstOrNull { it.backdropPath != null } ?: fresh.firstOrNull() ?: available.firstOrNull()
+    }
+
+    if (selectedShowId != null) {
+        TVShowBrowser(collections[MediaKind.TV_SHOW].orEmpty(), onOpen,
+            initialShowId = selectedShowId, onExit = { selectedShowId = null })
+        return
     }
 
     LazyColumn(contentPadding = PaddingValues(bottom = 48.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         item {
             ScreenHeader(
-                "Welcome to CineVault",
+                "Welcome to Cine-Media",
                 Modifier.padding(horizontal = ScreenPadding),
                 kicker = "YOUR PERSONAL CINEMA",
                 trailing = status,
@@ -166,7 +175,13 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
             if (continuing.isNotEmpty()) item { MovieRow("Continue Watching", continuing, onOpen, wide = true) }
             if (watchlist.isNotEmpty()) item { MovieRow("Watchlist", watchlist, onOpen) }
             featured?.let { movie -> item { FeaturedCard(movie, onClick = { onOpen(movie) }) } }
-            item { MovieRow("Recently Added", available.take(20), onOpen) }
+            for (kind in MediaKind.entries) {
+                val collection = collections[kind].orEmpty()
+                if (collection.isNotEmpty()) item {
+                    if (kind == MediaKind.TV_SHOW) TVShowRow(collection) { selectedShowId = it }
+                    else MovieRow(kind.label, collection.take(20), onOpen)
+                }
+            }
             if (unwatched.isNotEmpty()) item { MovieRow("Unwatched", unwatched, onOpen) }
         }
     }
@@ -240,6 +255,8 @@ private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) 
     var genre by remember { mutableStateOf(settings.libraryGenre) }
     var sourceId by remember { mutableStateOf(settings.librarySourceId) }
     var decade by remember { mutableStateOf(settings.libraryDecade) }
+    var kind by rememberSaveable { mutableStateOf(MediaKind.MOVIE) }
+    val collection = remember(movies, kind) { movies.filter { it.mediaKind == kind } }
     val genres = remember(movies) { listOf<String?>(null) + LibraryQuery.genres(movies) }
     val decades = remember(movies) { listOf<Int?>(null) + LibraryQuery.decades(movies) }
     // Wait for the first source result before clearing a saved selection. An empty
@@ -251,14 +268,15 @@ private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) 
             settings.librarySourceId = null
         }
     }
-    val visible = remember(movies, sort, filter, genre, selectedSourceId, decade) {
-        LibraryQuery.visible(movies, sort, filter, genre, selectedSourceId, decade)
+    val visible = remember(collection, sort, filter, genre, selectedSourceId, decade) {
+        LibraryQuery.visible(collection, sort, filter, genre, selectedSourceId, decade)
     }
+    val tvShows = remember(visible, kind) { if (kind == MediaKind.TV_SHOW) groupTVShows(visible) else emptyList() }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ScreenHeader(
-            "Movies", Modifier.padding(horizontal = ScreenPadding),
-            kicker = "YOUR COLLECTION", trailing = "${visible.size} titles",
+            kind.label, Modifier.padding(horizontal = ScreenPadding),
+            kicker = "YOUR COLLECTION", trailing = if (kind == MediaKind.TV_SHOW) "${tvShows.size} shows" else "${visible.size} titles",
         )
         // Keep focused filters outside the recycled result items. Replacing all
         // posters with an empty state must not dispose the control being used.
@@ -291,19 +309,27 @@ private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) 
                     decade = it
                     settings.libraryDecade = it
                 })
+                CycleButton("Section", kind, MediaKind.entries, { it.label }, {
+                    kind = it
+                    genre = null; decade = null; filter = LibraryFilter.ALL
+                })
             }
         }
         Box(Modifier.weight(1f)) {
+            if (kind == MediaKind.TV_SHOW && visible.isNotEmpty()) {
+                TVShowBrowser(visible, onOpen, preparedShows = tvShows)
+            } else {
             // Five columns on a 960dp-wide TV leave room for a complete poster
             // and its labels beneath the persistent filter controls.
             MovieGrid(minimumPosterWidth = 148.dp) {
                 when {
-                    movies.isEmpty() -> fullWidth { EmptyState("No movies yet", "Add your NAS in the Sources tab.") }
+                    collection.isEmpty() -> fullWidth { EmptyState("No ${kind.label.lowercase()} yet", "Add the parent media folder in Sources. Its subfolders are scanned automatically.") }
                     visible.isEmpty() -> fullWidth {
-                        EmptyState("No matching movies", "Try another filter, source, decade or genre.")
+                        EmptyState(if (kind == MediaKind.MOVIE) "No matching movies" else "No matching items", "Try another filter, source, decade or genre.")
                     }
                     else -> posters(visible, onOpen)
                 }
+            }
             }
         }
     }

@@ -2,6 +2,7 @@ package com.dineshdevkota.cinevault.smb
 
 import com.dineshdevkota.cinevault.core.RemoteFile
 import com.dineshdevkota.cinevault.core.VideoFile
+import com.dineshdevkota.cinevault.core.MediaFile
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.mssmb2.SMB2CreateDisposition
@@ -199,6 +200,37 @@ class SmbService(
         results
     }
 
+    /** Reports discovered files in batches while walking every nested media directory. */
+    suspend fun scanMedia(config: SourceConfig, onProgress: suspend (ScanProgress) -> Unit): List<RemoteFile> = withShare(config) { share ->
+        val results = mutableListOf<RemoteFile>()
+        val pending = mutableListOf(rootOf(config))
+        var folders = 0
+        while (pending.isNotEmpty()) {
+            coroutineContext.ensureActive()
+            val dir = pending.removeAt(pending.lastIndex)
+            val batch = mutableListOf<RemoteFile>()
+            for (entry in share.list(dir)) {
+                coroutineContext.ensureActive()
+                val name = entry.fileName
+                if (name == "." || name == "..") continue
+                val path = if (dir.isEmpty()) name else "$dir/$name"
+                if (EnumUtils.isSet(entry.fileAttributes, FileAttributes.FILE_ATTRIBUTE_DIRECTORY)) {
+                    if (!MediaFile.shouldSkipDirectory(name)) pending += path
+                } else if (MediaFile.shouldIndex(path, entry.endOfFile)) {
+                    val file = RemoteFile(path, entry.endOfFile)
+                    results += file
+                    batch += file
+                    if (batch.size >= 100) {
+                        onProgress(ScanProgress(batch.toList(), results.size, folders))
+                        batch.clear()
+                    }
+                }
+            }
+            onProgress(ScanProgress(batch.toList(), results.size, ++folders))
+        }
+        results
+    }
+
     /** Opens a file for streaming. Blocking; call from a background thread. */
     fun open(config: SourceConfig, path: String): RemoteHandle = withSessionBlocking(
         config, closeInvalidResult = { handle: RemoteHandle -> runCatching { handle.close() } },
@@ -269,3 +301,5 @@ class SmbService(
             config.rootPath.replace('\\', '/').split('/').filter { it.isNotEmpty() }.joinToString("/")
     }
 }
+
+data class ScanProgress(val files: List<RemoteFile>, val found: Int, val folders: Int)

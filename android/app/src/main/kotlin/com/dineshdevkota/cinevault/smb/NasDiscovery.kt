@@ -3,9 +3,11 @@ package com.dineshdevkota.cinevault.smb
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.ext.SdkExtensions
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.channels.awaitClose
@@ -24,6 +26,7 @@ data class NasDiscoveryState(
 /** Searches only SMB services advertised on the local network. */
 class NasDiscovery(context: Context) {
     private val manager = context.applicationContext.getSystemService(NsdManager::class.java)
+    private val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
 
     fun discover(): Flow<NasDiscoveryState> = callbackFlow {
         val nsd = manager
@@ -32,7 +35,7 @@ class NasDiscovery(context: Context) {
             close()
             return@callbackFlow
         }
-        val search = Search(nsd, { trySend(it) }, { close() })
+        val search = Search(nsd, wifiManager, { trySend(it) }, { close() })
         search.start()
         awaitClose { search.cancel() }
     }.conflate()
@@ -41,6 +44,7 @@ class NasDiscovery(context: Context) {
 @Suppress("DEPRECATION") // Sequential one-shot resolution also supports Android 8–13.
 private class Search(
     private val manager: NsdManager,
+    private val wifiManager: WifiManager?,
     private val emit: (NasDiscoveryState) -> Unit,
     private val close: () -> Unit,
 ) {
@@ -55,6 +59,7 @@ private class Search(
     private var registered = false
     private var finished = false
     private var stopAttempts = 0
+    private var multicastLock: WifiManager.MulticastLock? = null
     private val deadline = Runnable { finish() }
 
     private fun dispatch(block: () -> Unit) {
@@ -110,6 +115,7 @@ private class Search(
         publish()
         handler.postDelayed(deadline, 10_000L)
         try {
+            acquireMulticastLockIfNeeded()
             registered = true
             manager.discoverServices("_smb._tcp.", NsdManager.PROTOCOL_DNS_SD, listener)
         } catch (_: SecurityException) {
@@ -118,6 +124,29 @@ private class Search(
         } catch (_: RuntimeException) {
             registered = false
             finish("Network discovery is unavailable. You can enter the NAS address.")
+        }
+    }
+
+    private fun acquireMulticastLockIfNeeded() {
+        // Foreground NSD manages Wi-Fi multicast itself from Android 13 extension 7
+        // (and on Android 14+). Older Wi-Fi devices otherwise filter mDNS replies.
+        val systemManagesMulticast = Build.VERSION.SDK_INT >= 34 ||
+            (Build.VERSION.SDK_INT >= 33 &&
+                SdkExtensions.getExtensionVersion(Build.VERSION_CODES.TIRAMISU) >= 7)
+        if (systemManagesMulticast) return
+        val lock = wifiManager?.createMulticastLock("CineMedia:NasDiscovery") ?: return
+        lock.setReferenceCounted(false)
+        multicastLock = lock
+        lock.acquire()
+    }
+
+    private fun releaseMulticastLock() {
+        val lock = multicastLock
+        multicastLock = null
+        try {
+            if (lock?.isHeld == true) lock.release()
+        } catch (_: RuntimeException) {
+            // Cleanup is idempotent even if Wi-Fi has already released the lock.
         }
     }
 
@@ -172,6 +201,7 @@ private class Search(
         if (Build.VERSION.SDK_INT >= 34) resolving?.let {
             try { manager.stopServiceResolution(it) } catch (_: RuntimeException) { /* Already ended. */ }
         }
+        releaseMulticastLock()
         // Earlier Android versions cannot cancel resolution; its callbacks are ignored.
         resolving = null
         pending.clear()

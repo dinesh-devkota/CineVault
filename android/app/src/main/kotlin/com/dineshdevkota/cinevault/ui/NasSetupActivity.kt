@@ -177,11 +177,11 @@ private fun NasSetupScreen(onDone: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            ScreenHeader("Add NAS", kicker = "YOUR NETWORK", trailing = when (step) {
+            ScreenHeader("Add NAS", kicker = "YOUR NETWORK", showBack = false, trailing = when (step) {
                 SetupStep.Devices -> "1 · Choose a device"
                 SetupStep.Connect -> "2 · Connect"
                 SetupStep.Shares -> "3 · Choose a share"
-                SetupStep.Folders -> "4 · Choose a movie folder"
+                SetupStep.Folders -> "4 · Choose a media folder"
             })
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = { back() }) { Text(if (busy) "Cancel connection" else "Back") }
@@ -253,7 +253,7 @@ private fun NasSetupScreen(onDone: () -> Unit) {
             SetupStep.Folders -> {
                 item {
                     Text("$share / ${rootPath.ifBlank { "Top level" }}", style = MaterialTheme.typography.titleMedium)
-                    Text("Choose the folder containing your movies. Its subfolders will also be scanned.", color = SecondaryText)
+                    Text("Choose the parent media folder once. All its subfolders become Movies, Documentaries, and Music.", color = SecondaryText)
                     TvTextField(name, { name = it }, "Library name (optional)", enabled = !busy)
                 }
                 item {

@@ -84,7 +84,8 @@ private fun EditMovieScreen(movieId: String, onClose: () -> Unit) {
     // Keyed so the fields follow the saved movie, e.g. after a reset whose re-match failed.
     var title by remember(current.title) { mutableStateOf(current.title) }
     var year by remember(current.year) { mutableStateOf(current.year?.toString().orEmpty()) }
-    var query by remember(current.title) { mutableStateOf(current.title) }
+    val episode = current.episodeInfo
+    var query by remember(current.title, current.seriesTitle) { mutableStateOf(current.seriesTitle ?: episode?.seriesTitle ?: current.title) }
     var results by remember { mutableStateOf<List<TmdbMovieSummary>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<Notice?>(null) }
@@ -114,7 +115,7 @@ private fun EditMovieScreen(movieId: String, onClose: () -> Unit) {
             .padding(horizontal = ScreenPadding, vertical = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenHeader("Edit Movie", kicker = "LIBRARY", trailing = current.fileName)
+        ScreenHeader("Edit Media", kicker = "LIBRARY", trailing = current.fileName)
         Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Details", style = MaterialTheme.typography.titleMedium)
@@ -187,8 +188,8 @@ private fun EditMovieScreen(movieId: String, onClose: () -> Unit) {
                         enabled = !busy && query.isNotBlank(),
                         onClick = {
                             launchWork {
-                                results = editor.search(query)
-                                if (results.isEmpty()) "No results." else "Choose the right movie."
+                                results = if (episode != null) editor.searchTV(query) else editor.search(query)
+                                if (results.isEmpty()) "No results." else if (episode != null) "Choose the right TV show." else "Choose the right movie."
                             }
                         },
                     ) {
@@ -203,7 +204,8 @@ private fun EditMovieScreen(movieId: String, onClose: () -> Unit) {
                         MatchCard(result) {
                             if (!busy) {
                                 launchWork {
-                                    editor.fixMatch(current.id, result.id)
+                                    if (episode != null) editor.fixTVMatch(current.id, result.id)
+                                    else editor.fixMatch(current.id, result.id)
                                     null
                                 }
                             }

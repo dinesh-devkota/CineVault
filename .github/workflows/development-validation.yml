@@ -27,7 +27,7 @@ concurrency:
 jobs:
   core-tests:
     name: Core package tests
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - name: swift test
@@ -40,7 +40,7 @@ jobs:
 
   tvos-build:
     name: Build tvOS app (unsigned)
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -59,7 +59,7 @@ jobs:
 
   nas-integration:
     name: Test SMB on Apple TV simulator
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -155,7 +155,7 @@ jobs:
 
   preview:
     name: Capture Apple TV preview
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -230,12 +230,17 @@ jobs:
           echo "$LAUNCH"
           PID="${LAUNCH##*: }"
           capture_when_ready "$RUNNER_TEMP/cinevault-detail.png" "Start Over"
+          xcrun simctl terminate "$DEVICE" com.dineshdevkota.cinevault
+          LAUNCH=$(xcrun simctl launch "$DEVICE" com.dineshdevkota.cinevault --ui-preview-nas)
+          PID="${LAUNCH##*: }"
+          capture_when_ready "$RUNNER_TEMP/cinevault-nas.png" "Devices on your network"
       - uses: actions/upload-artifact@v4
         with:
           name: cinevault-ui-preview
           path: |
             ${{ runner.temp }}/cinevault-home.png
             ${{ runner.temp }}/cinevault-detail.png
+            ${{ runner.temp }}/cinevault-nas.png
           if-no-files-found: error
           retention-days: 7
       - name: Upload screenshots for failed previews

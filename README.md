@@ -1,4 +1,6 @@
-# CineVault
+# Cine-Media
+
+Add one parent NAS folder to build your Movies, Documentaries, TV Shows, and Music library. See the [media setup and naming guide](docs/MEDIA-GUIDE.md) for folder examples, free personal TMDB setup, and playback help. The existing CineVault project and app identifiers are retained so updates keep your saved library.
 
 A movie library for **Apple TV and Android TV** that streams movies directly from
 a NAS over SMB. Built with SwiftUI on tvOS and Compose for TV on Android.

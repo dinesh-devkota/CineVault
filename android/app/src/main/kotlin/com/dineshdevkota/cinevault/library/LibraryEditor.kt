@@ -26,6 +26,14 @@ class LibraryEditor(
         metadata.tmdb.search(query.trim(), null)
     }
 
+    suspend fun searchTV(query: String): List<TmdbMovieSummary> = withContext(Dispatchers.IO) {
+        metadata.tmdb.searchTV(query.trim(), null)
+    }
+
+    suspend fun fixTVMatch(movieId: String, seriesId: Int) = withContext(Dispatchers.IO) {
+        metadata.applyTV(seriesId, movieId, force = true)
+    }
+
     /** Takes TMDB's title and details for the chosen result and locks them against automatic matching. */
     suspend fun fixMatch(movieId: String, tmdbId: Int) = withContext(Dispatchers.IO) {
         metadata.apply(tmdbId, movieId, force = true)

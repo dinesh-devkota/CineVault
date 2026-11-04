@@ -27,6 +27,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -174,8 +176,12 @@ fun MovieRow(title: String, movies: List<MovieEntity>, onOpen: (MovieEntity) -> 
 }
 
 @Composable
-fun ScreenHeader(title: String, modifier: Modifier = Modifier, kicker: String? = null, trailing: String? = null) {
+fun ScreenHeader(title: String, modifier: Modifier = Modifier, kicker: String? = null, trailing: String? = null, showBack: Boolean = true) {
+    val activity = LocalActivity.current as? ComponentActivity
     Row(modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
+        if (showBack && activity != null && activity !is com.dineshdevkota.cinevault.MainActivity) {
+            OutlinedButton(onClick = { activity.onBackPressedDispatcher.onBackPressed() }, modifier = Modifier.padding(end = 16.dp)) { Text("Back") }
+        }
         Column(Modifier.weight(1f)) {
             if (kicker != null) {
                 Text(kicker, style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 3.sp), color = Accent)
