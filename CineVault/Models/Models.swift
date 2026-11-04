@@ -1,3 +1,4 @@
+import CineVaultCore
 import Foundation
 import SwiftData
 
@@ -112,8 +113,11 @@ final class Movie {
     }
 
     func resetToFileName() {
+        let parsed = FilenameParser.parse(path: filePath)
+        parsedTitle = parsed.title
+        parsedYear = parsed.year
         isLocked = false
-        tmdbID = nil
+        tmdbID = parsed.tmdbID
         setTitle(parsedTitle.isEmpty ? fileName : parsedTitle)
         year = parsedYear
         overview = nil

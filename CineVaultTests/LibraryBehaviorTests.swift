@@ -388,4 +388,77 @@ final class LibraryBehaviorTests: XCTestCase {
         XCTAssertTrue(movie.isWatched)
         XCTAssertEqual(movie.playbackPosition, 120)
     }
+
+    func testResetToFileNameRestoresExplicitFileAndFolderTMDBTags() async throws {
+        for path in ["Movies/The Matrix (1999) {tmdb-603}.mp4",
+                     "Movies/The Matrix (1999) {tmdb-603}/movie.mp4"] {
+            let source = MediaSource(name: "Test", host: "test.invalid", share: "Movies", rootPath: "", username: "")
+            let movie = Movie(filePath: path, fileSize: 1, source: source)
+            movie.parsedTitle = "Outdated parser result"
+            movie.parsedYear = 2000
+            movie.setTitle("Wrong manual match")
+            movie.tmdbID = 2
+            movie.isLocked = true
+            movie.metadataFetched = true
+            movie.isHidden = true
+            movie.isWatched = true
+            movie.playbackPosition = 120
+            var requestPaths: [String] = []
+            let service = MetadataService(requestData: { request in
+                requestPaths.append(request.url!.path)
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                let data = Data(#"{"id":603,"title":"The Matrix","release_date":"1999-03-30"}"#.utf8)
+                return (data, response)
+            }, readAPIKey: { "fixture" })
+
+            service.resetToFileName(movie)
+
+            XCTAssertEqual(movie.parsedTitle, "The Matrix")
+            XCTAssertEqual(movie.parsedYear, 1999)
+            XCTAssertEqual(movie.title, "The Matrix")
+            XCTAssertEqual(movie.year, 1999)
+            XCTAssertEqual(movie.tmdbID, 603, "Reset must restore the explicit ID from \(path).")
+            XCTAssertFalse(movie.isLocked)
+            XCTAssertFalse(movie.metadataFetched)
+            try await service.match(movie)
+
+            XCTAssertEqual(requestPaths, ["/3/movie/603"], "An explicit filename ID must bypass title search.")
+            XCTAssertEqual(movie.tmdbID, 603)
+            XCTAssertTrue(movie.metadataFetched)
+            XCTAssertTrue(movie.isHidden)
+            XCTAssertTrue(movie.isWatched)
+            XCTAssertEqual(movie.playbackPosition, 120)
+        }
+    }
+
+    func testPendingMetadataDoesNotApplyToCascadeDeletedMovie() async throws {
+        let container = try ModelContainer(for: MediaSource.self, Movie.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        context.autosaveEnabled = false
+        let source = MediaSource(name: "Test", host: "test.invalid", share: "Movies", rootPath: "", username: "")
+        let movie = Movie(filePath: "Original.mp4", fileSize: 1, source: source)
+        movie.setTitle("Original")
+        context.insert(source)
+        context.insert(movie)
+        try context.save()
+        let gate = ScanGate()
+        defer { gate.release() }
+        let service = MetadataService(requestData: { request in
+            await gate.wait()
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data(#"{"id":1,"title":"Deleted movie"}"#.utf8), response)
+        }, readAPIKey: { "fixture" })
+        let lookup = Task { try await service.apply(tmdbID: 1, to: movie, force: true) }
+        guard await waitUntilEntered(gate) else { XCTFail("Lookup did not start."); return }
+
+        context.delete(source)
+        try context.save()
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Movie>()).isEmpty, "Deleting the source must cascade to its movies.")
+        gate.release()
+        let applied = try await lookup.value
+
+        XCTAssertFalse(applied, "An in-flight response must not access or update a deleted movie.")
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Movie>()).isEmpty)
+    }
 }
