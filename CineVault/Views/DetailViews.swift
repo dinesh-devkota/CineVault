@@ -14,6 +14,7 @@ struct MovieDetailView: View {
     @State private var missingSource = false
     @State private var credentialUnavailable = false
     @State private var credentialMessage = ""
+    @State private var watchlistError: String?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -65,6 +66,7 @@ struct MovieDetailView: View {
                     #endif
                     playbackControls
                         .padding(.top, 16)
+                    personalActions
                     fileDetails
                         .padding(.top, 24)
                 }
@@ -132,6 +134,29 @@ struct MovieDetailView: View {
                 Label("Edit", systemImage: "pencil")
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    private var personalActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                let wasWatchlisted = movie.isWatchlisted
+                movie.isWatchlisted.toggle()
+                do {
+                    try movie.modelContext?.save()
+                    watchlistError = nil
+                } catch {
+                    movie.isWatchlisted = wasWatchlisted
+                    watchlistError = "Could not save the watchlist: \(error.localizedDescription)"
+                }
+            } label: {
+                Label(movie.isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist",
+                      systemImage: movie.isWatchlisted ? "bookmark.fill" : "bookmark")
+            }
+            .buttonStyle(.bordered)
+            if let watchlistError {
+                Text(watchlistError).font(.caption).foregroundStyle(.red)
+            }
         }
     }
 

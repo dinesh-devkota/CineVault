@@ -89,6 +89,7 @@ final class Movie {
     var lastPlayedAt: Date?
     var isHidden: Bool = false
     var isMissing: Bool = false
+    var isWatchlisted: Bool = false
 
     var source: MediaSource?
 
