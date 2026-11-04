@@ -251,11 +251,7 @@ struct EditMovieView: View {
                 }
                 #endif
                 Button("Reset to File Name") {
-                    movie.isLocked = false
-                    movie.tmdbID = nil
-                    movie.setTitle(movie.parsedTitle)
-                    movie.year = movie.parsedYear
-                    movie.metadataFetched = false
+                    MetadataService.shared.resetToFileName(movie)
                     Task {
                         do {
                             if try MetadataService.shared.hasKey {
@@ -296,8 +292,7 @@ struct EditMovieView: View {
     private func rematch(_ result: TMDBMovieSummary) {
         Task {
             do {
-                try await MetadataService.shared.apply(tmdbID: result.id, to: movie, force: true)
-                movie.isLocked = true
+                guard try await MetadataService.shared.apply(tmdbID: result.id, to: movie, force: true) else { return }
                 try movie.modelContext?.save()
                 dismiss()
             } catch {

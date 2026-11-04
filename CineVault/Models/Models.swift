@@ -111,6 +111,21 @@ final class Movie {
         sortTitle = Movie.makeSortTitle(newTitle)
     }
 
+    func resetToFileName() {
+        isLocked = false
+        tmdbID = nil
+        setTitle(parsedTitle.isEmpty ? fileName : parsedTitle)
+        year = parsedYear
+        overview = nil
+        tagline = nil
+        posterPath = nil
+        backdropPath = nil
+        genres = []
+        runtimeMinutes = nil
+        rating = nil
+        metadataFetched = false
+    }
+
     static func makeSortTitle(_ title: String) -> String {
         let lower = title.lowercased()
         for article in ["the ", "a ", "an "] where lower.hasPrefix(article) {

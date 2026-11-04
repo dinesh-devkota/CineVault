@@ -70,10 +70,19 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
                 info.isByteRangeAccessSupported = true
             }
             if let dataRequest = request.dataRequest {
+                guard dataRequest.requestedOffset >= 0 else {
+                    throw SMBError.invalidByteRange
+                }
                 let offset = dataRequest.currentOffset > 0 ? dataRequest.currentOffset : dataRequest.requestedOffset
-                let end = dataRequest.requestsAllDataToEndOfResource
-                    ? size
-                    : min(size, dataRequest.requestedOffset + Int64(dataRequest.requestedLength))
+                let end: Int64
+                if dataRequest.requestsAllDataToEndOfResource {
+                    end = size
+                } else {
+                    guard dataRequest.requestedLength >= 0 else { throw SMBError.invalidByteRange }
+                    let (requestedEnd, overflow) = dataRequest.requestedOffset.addingReportingOverflow(Int64(dataRequest.requestedLength))
+                    guard !overflow else { throw SMBError.invalidByteRange }
+                    end = min(size, requestedEnd)
+                }
                 try await streamBytes(from: offset, to: end) { data in
                     dataRequest.respond(with: data)
                 }
@@ -87,6 +96,7 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
     }
 
     func streamBytes(from start: Int64, to end: Int64, respond: (Data) -> Void) async throws {
+        guard start >= 0, end >= start else { throw SMBError.invalidByteRange }
         var offset = start
         while offset < end {
             try Task.checkCancellation()
@@ -110,6 +120,7 @@ final class PlaybackController: ObservableObject {
     private let loader: SMBResourceLoader
     private let movie: Movie
     private var finishedPlayback = false
+    private var stopped = false
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
 
@@ -160,7 +171,7 @@ final class PlaybackController: ObservableObject {
     }
 
     func record(time: Double) {
-        guard !finishedPlayback, time.isFinite, time > 0 else { return }
+        guard !stopped, !finishedPlayback, time.isFinite, time > 0 else { return }
         let boundary = player.currentItem?.forwardPlaybackEndTime
         let limit = boundary.flatMap { $0.isValid && $0.seconds.isFinite ? $0.seconds : nil }
         let position = limit.map { min(time, $0) } ?? time
@@ -178,6 +189,7 @@ final class PlaybackController: ObservableObject {
     }
 
     private func finish() {
+        guard !stopped else { return }
         finishedPlayback = true
         movie.isWatched = true
         movie.playbackPosition = 0
@@ -185,10 +197,12 @@ final class PlaybackController: ObservableObject {
     }
 
     func stop() {
+        guard !stopped else { return }
         #if CINEVAULT_COMMERCIAL
         commercialSession.stop()
         #endif
         record(time: player.currentTime().seconds)
+        stopped = true
         player.pause()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
