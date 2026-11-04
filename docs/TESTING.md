@@ -7,7 +7,7 @@ swift test --package-path Packages/CineVaultCore
 python3 -B -m unittest discover -s scripts/tests -p 'test_commercial_*.py'
 cd android
 ./gradlew --no-daemon --max-workers=4 :core:test :app:testDebugUnitTest \
-  :app:lintDebug :app:assembleDebug :app:lintRelease :app:assembleRelease
+  :app:lintDebug :app:assembleDebug :app:lintRelease :app:assembleRelease :app:bundleRelease
 ```
 
 The managed Linux environment has cache and tool activation instructions in
@@ -18,8 +18,10 @@ The managed Linux environment has cache and tool activation instructions in
 `android/app/src/androidTest` runs against actual Android APIs. It covers:
 
 - D-pad access to all five tabs, Back navigation, and activity recreation.
+- Watchlist actions and saved source/genre/decade filters using the remote, including source deletion fallback.
 - Android Keystore encryption, unique nonces, and corrupt credential errors.
 - Room foreign-key deletion and metadata updates preserving manual titles and progress.
+- File-backed Room v1-to-v2 migration preserving existing library data and encrypted credentials; Watchlist persistence through updates and reopening.
 - Delayed metadata responses racing with manual matches and resets.
 - NAS source edits/deletion while a scan is suspended.
 - Media3 DataSource byte-range/EOF behavior and cleanup after a failed open.
@@ -50,7 +52,10 @@ The public workflows build the tvOS app on macOS, run XCTest with the synthetic
 SMB fixture, and check screenshots for stable Home/detail content. Regression
 tests cover invalidated connections, cancelled scans, byte-range validation,
 late playback callbacks, concurrent manual/automatic matches, metadata reset,
-and responses or queued matches after source deletion.
+and responses or queued matches after source deletion. A frozen legacy SwiftData
+schema tests opening an existing library with the new Watchlist field, preserving
+source identity, metadata, visibility, and playback state. Additional tests cover
+combined browse filters and saved preferences.
 
 ## Further device testing
 

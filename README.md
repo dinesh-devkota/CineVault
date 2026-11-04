@@ -5,8 +5,8 @@ a NAS over SMB. Built with SwiftUI on tvOS and Compose for TV on Android.
 
 ## Android TV
 
-The Android TV app includes direct SMB playback,
-library management, search, and TMDB metadata. See the [Android guide](docs/ANDROID.md)
+The Android TV app includes direct SMB playback, a personal Watchlist,
+library management, saved source/genre/decade filters, search, and TMDB metadata. See the [Android guide](docs/ANDROID.md)
 for build and installation instructions, release signing, and a first NAS playback
 test. Android billing and Google Play distribution remain pending. Real Android TV
 device and NAS validation has not yet been completed.
@@ -20,6 +20,7 @@ device and NAS validation has not yet been completed.
 - Posters, backdrops, overview, genres, runtime and rating from TMDB (your own free API key).
 - Cinematic Apple TV browsing with backdrop artwork, landscape Continue Watching cards, focus-aware posters, a movie detail screen, and a dark, uncluttered interface.
 - Home (Continue Watching / Recently Added / Unwatched), full library grid with sort + filter + genre, and search.
+- Personal Watchlist with a Home shelf and library filter. Saved source, genre, and decade filters help browse larger NAS libraries.
 - Streaming playback with AVPlayer via a custom resource loader that serves byte ranges straight from SMB — instant start and seeking, nothing is downloaded first.
 - Resume position, watched state (automatic after 92%), progress bars. Replaying a watched movie makes it resumable again.
 - Manage entries: rename, fix match (search TMDB and pick), hide, reset progress, reset to file name.
