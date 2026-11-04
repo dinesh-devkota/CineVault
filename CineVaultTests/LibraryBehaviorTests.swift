@@ -461,4 +461,86 @@ final class LibraryBehaviorTests: XCTestCase {
         XCTAssertFalse(applied, "An in-flight response must not access or update a deleted movie.")
         XCTAssertTrue(try context.fetch(FetchDescriptor<Movie>()).isEmpty)
     }
+
+    func testPendingMetadataSearchDoesNotLoadDetailsAfterSourceDeletion() async throws {
+        let container = try ModelContainer(for: MediaSource.self, Movie.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        context.autosaveEnabled = false
+        let source = MediaSource(name: "Test", host: "test.invalid", share: "Movies", rootPath: "", username: "")
+        let movie = Movie(filePath: "Original.mp4", fileSize: 1, source: source)
+        movie.parsedTitle = "Original"
+        movie.setTitle("Original")
+        context.insert(source)
+        context.insert(movie)
+        try context.save()
+        let gate = ScanGate()
+        defer { gate.release() }
+        var requests = 0
+        let service = MetadataService(requestData: { request in
+            requests += 1
+            guard requests == 1 else {
+                XCTFail("A search result for a deleted movie must not trigger a details request.")
+                throw MetadataError.httpStatus(500)
+            }
+            await gate.wait()
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data(#"{"results":[{"id":1,"title":"Original"}]}"#.utf8), response)
+        }, readAPIKey: { "fixture" })
+        let lookup = Task { try await service.match(movie) }
+        guard await waitUntilEntered(gate) else { XCTFail("Search did not start."); return }
+
+        context.delete(source)
+        try context.save()
+        gate.release()
+        try await lookup.value
+
+        XCTAssertEqual(requests, 1)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Movie>()).isEmpty)
+    }
+
+    func testMetadataBatchSkipsMoviesDeletedWhileEarlierRequestWasPending() async throws {
+        let container = try ModelContainer(for: MediaSource.self, Movie.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        context.autosaveEnabled = false
+        let source = MediaSource(name: "Test", host: "test.invalid", share: "Movies", rootPath: "", username: "")
+        let first = Movie(filePath: "First.mp4", fileSize: 1, source: source)
+        first.setTitle("First")
+        first.tmdbID = 1
+        let second = Movie(filePath: "Second.mp4", fileSize: 1, source: source)
+        second.setTitle("Second")
+        second.tmdbID = 2
+        context.insert(source)
+        context.insert(first)
+        context.insert(second)
+        try context.save()
+        let gate = ScanGate()
+        defer { gate.release() }
+        var requests = 0
+        let service = MetadataService(requestData: { request in
+            requests += 1
+            guard requests == 1 else {
+                XCTFail("A queued, deleted movie must not start another metadata request.")
+                throw MetadataError.httpStatus(500)
+            }
+            await gate.wait()
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data(#"{"id":1,"title":"First"}"#.utf8), response)
+        }, readAPIKey: { "fixture" })
+        let update = Task {
+            try await service.update([first, second], in: context) { try await service.match($0) }
+        }
+        guard await waitUntilEntered(gate) else { XCTFail("Batch lookup did not start."); return }
+
+        context.delete(source)
+        try context.save()
+        gate.release()
+        let summary = try await update.value
+
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(summary.attempted, 1)
+        XCTAssertEqual(summary.failed, 0)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Movie>()).isEmpty)
+    }
 }
