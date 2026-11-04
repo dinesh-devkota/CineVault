@@ -59,16 +59,16 @@ actor SMBService {
 
     func reset(_ config: SourceConfig) async {
         generations[config.id, default: 0] &+= 1
-        if let manager = managers.removeValue(forKey: config) {
-            try? await manager.disconnectShare(gracefully: false)
-        }
+        // In-flight operations retain their manager until their file handles close.
+        // Disconnecting here frees those handles underneath AMSMB2's reads.
+        // Its context disconnects on deinit after the final operation releases it.
+        managers.removeValue(forKey: config)
     }
 
     func reset(sourceID: UUID) async {
         generations[sourceID, default: 0] &+= 1
         let stale = managers.filter { $0.key.id == sourceID }
         for config in stale.keys { managers.removeValue(forKey: config) }
-        for manager in stale.values { try? await manager.disconnectShare(gracefully: false) }
     }
 
     /// Retries once with a fresh connection (NAS may drop idle sessions).
