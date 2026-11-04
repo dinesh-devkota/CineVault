@@ -1,0 +1,255 @@
+# Runs the existing public validation jobs from a development-branch push.
+# Keep these jobs aligned with ci.yml, nas-integration.yml, ui-preview.yml,
+# and android.yml. No signing credentials or store uploads are involved.
+name: Development validation
+
+on:
+  push:
+    branches: [dinesh-devkota-sonepar-build-cinevault-tvos-app]
+    paths: [.github/workflows/development-validation.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Core package tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: Packages/CineVaultCore
+        run: swift test
+      - name: Test commercial build helpers
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_commercial_*.py'
+          ruby -c fastlane/Fastfile
+
+  tvos-build:
+    name: Build tvOS app (unsigned)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: |
+          python3 scripts/generate_app_icons.py
+          xcodegen generate
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+            -destination 'generic/platform=tvOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 200
+
+  nas-integration:
+    name: Test SMB on Apple TV simulator
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: |
+          brew install xcodegen
+          python -m pip install -r scripts/nas-test-requirements.txt
+      - name: Generate project
+        run: |
+          python3 scripts/generate_app_icons.py
+          xcodegen generate
+      - name: Select a tvOS simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk appletvsimulator --show-sdk-version | tr '.' '-')
+          DEVICE=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          runtime = "com.apple.CoreSimulator.SimRuntime.tvOS-" + sys.argv[1]
+          devices = json.load(sys.stdin)["devices"].get(runtime, [])
+          candidates = [d for d in devices if d.get("isAvailable") and d["name"].startswith("Apple TV")]
+          if not candidates:
+              sys.exit("No available Apple TV simulator for " + runtime)
+          device = next((d for d in candidates if "4K" in d["name"] and "1080p" in d["name"]), candidates[0])
+          print(device["udid"])
+          ' "$SDK")
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+      - name: Build simulator tests
+        run: |
+          set -o pipefail
+          xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+            -destination 'id=${{ steps.simulator.outputs.device }}' \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/cinevault-tests" \
+            CODE_SIGNING_ALLOWED=NO build-for-testing | tail -n 160
+      - name: Test against local SMB fixture
+        run: |
+          set -euo pipefail
+          DEVICE='${{ steps.simulator.outputs.device }}'
+          APP="$RUNNER_TEMP/cinevault-tests/Build/Products/Debug-appletvsimulator/CineVault.app"
+          # The physical-device arm64 requirement does not apply to the simulator.
+          plutil -remove UIRequiredDeviceCapabilities "$APP/Info.plist"
+          python scripts/nas_fixture.py "$RUNNER_TEMP/nas-fixture" >"$RUNNER_TEMP/nas-fixture.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              cat "$RUNNER_TEMP/nas-fixture.log" >&2
+              exit 1
+            fi
+            if nc -z 127.0.0.1 1445; then break; fi
+            sleep 1
+          done
+          if ! nc -z 127.0.0.1 1445; then
+            echo "SMB fixture did not start." >&2
+            cat "$RUNNER_TEMP/nas-fixture.log" >&2
+            exit 1
+          fi
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+            -destination "id=$DEVICE" -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/cinevault-tests" \
+            -resultBundlePath "$RUNNER_TEMP/nas-results.xcresult" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test-without-building | tail -n 200
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nas-integration-diagnostics
+          path: |
+            ${{ runner.temp }}/nas-fixture.log
+            ${{ runner.temp }}/nas-results.xcresult
+          if-no-files-found: warn
+          retention-days: 7
+
+  preview:
+    name: Capture Apple TV preview
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: |
+          python3 scripts/generate_app_icons.py
+          xcodegen generate
+      - name: Select a tvOS simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk appletvsimulator --show-sdk-version | tr '.' '-')
+          DEVICE=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          runtime = "com.apple.CoreSimulator.SimRuntime.tvOS-" + sys.argv[1]
+          devices = json.load(sys.stdin)["devices"].get(runtime, [])
+          candidates = [d for d in devices if d.get("isAvailable") and d["name"].startswith("Apple TV")]
+          if not candidates:
+              sys.exit("No available Apple TV simulator for " + runtime)
+          device = next((d for d in candidates if "4K" in d["name"] and "1080p" in d["name"]), candidates[0])
+          print(device["udid"])
+          ' "$SDK")
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+      - name: Build simulator app
+        run: |
+          set -o pipefail
+          xcodebuild -project CineVault.xcodeproj -scheme CineVault \
+            -destination 'id=${{ steps.simulator.outputs.device }}' \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/cinevault-derived" \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 160
+      - name: Capture preview
+        run: |
+          set -euo pipefail
+          DEVICE='${{ steps.simulator.outputs.device }}'
+          APP="$RUNNER_TEMP/cinevault-derived/Build/Products/Debug-appletvsimulator/CineVault.app"
+          swiftc scripts/verify_preview.swift -o "$RUNNER_TEMP/verify-preview"
+          capture_when_ready() {
+            local path="$1"
+            local expected="$2"
+            for attempt in {1..24}; do
+              if ! kill -0 "$PID" 2>/dev/null; then
+                echo "CineVault exited before $expected became visible." >&2
+                return 1
+              fi
+              if xcrun simctl io "$DEVICE" screenshot "$path" >/dev/null 2>&1 &&
+                 "$RUNNER_TEMP/verify-preview" "$path" "$expected"; then
+                sleep 15
+                if kill -0 "$PID" 2>/dev/null &&
+                   xcrun simctl io "$DEVICE" screenshot "$path" >/dev/null 2>&1 &&
+                   "$RUNNER_TEMP/verify-preview" "$path" "$expected"; then
+                  return 0
+                fi
+              fi
+              sleep 5
+            done
+            echo "Timed out waiting for $expected in the screenshot." >&2
+            return 1
+          }
+          # The physical-device arm64 requirement does not apply to the simulator.
+          plutil -remove UIRequiredDeviceCapabilities "$APP/Info.plist"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" "$APP"
+          LAUNCH=$(xcrun simctl launch "$DEVICE" com.dineshdevkota.cinevault --ui-preview)
+          echo "$LAUNCH"
+          PID="${LAUNCH##*: }"
+          capture_when_ready "$RUNNER_TEMP/cinevault-home.png" "Continue Watching"
+          xcrun simctl terminate "$DEVICE" com.dineshdevkota.cinevault
+          LAUNCH=$(xcrun simctl launch "$DEVICE" com.dineshdevkota.cinevault --ui-preview-detail)
+          echo "$LAUNCH"
+          PID="${LAUNCH##*: }"
+          capture_when_ready "$RUNNER_TEMP/cinevault-detail.png" "Start Over"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cinevault-ui-preview
+          path: |
+            ${{ runner.temp }}/cinevault-home.png
+            ${{ runner.temp }}/cinevault-detail.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload screenshots for failed previews
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinevault-preview-diagnostics
+          path: ${{ runner.temp }}/cinevault-*.png
+          if-no-files-found: warn
+          retention-days: 7
+
+  android-build:
+    name: Test and build Android TV app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test, lint and assemble
+        run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinevault-androidtv-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            android/**/build/reports/
+          if-no-files-found: ignore
