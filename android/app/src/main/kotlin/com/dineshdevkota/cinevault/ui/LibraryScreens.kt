@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Card
@@ -206,9 +207,9 @@ private fun FeaturedCard(movie: MovieEntity, onClick: () -> Unit) {
 }
 
 @Composable
-private fun MovieGrid(content: LazyGridScope.() -> Unit) {
+private fun MovieGrid(minimumPosterWidth: Dp = PosterWidth, content: LazyGridScope.() -> Unit) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(PosterWidth),
+        columns = GridCells.Adaptive(minimumPosterWidth),
         contentPadding = PaddingValues(start = ScreenPadding, end = ScreenPadding, bottom = 48.dp),
         horizontalArrangement = Arrangement.spacedBy(28.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
@@ -249,7 +250,7 @@ private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) 
         LibraryQuery.visible(movies, sort, filter, genre, selectedSourceId, decade)
     }
 
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(28.dp)) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ScreenHeader(
             "Movies", Modifier.padding(horizontal = ScreenPadding),
             kicker = "YOUR COLLECTION", trailing = "${visible.size} titles",
@@ -288,7 +289,9 @@ private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) 
             }
         }
         Box(Modifier.weight(1f)) {
-            MovieGrid {
+            // Five columns on a 960dp-wide TV leave room for a complete poster
+            // and its labels beneath the persistent filter controls.
+            MovieGrid(minimumPosterWidth = 148.dp) {
                 when {
                     movies.isEmpty() -> fullWidth { EmptyState("No movies yet", "Add your NAS in the Sources tab.") }
                     visible.isEmpty() -> fullWidth {
