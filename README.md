@@ -224,6 +224,10 @@ cd Packages/CineVaultCore && swift test
 The public CI also runs `python3 -m unittest discover -s scripts/tests -p 'test_commercial_*.py'`
 to check commercial build helpers and keep private command output out of public logs.
 
+See [Testing](docs/TESTING.md) for Android debug/release checks, Android TV emulator
+tests, the synthetic SMB fixture, and the regression coverage. The development
+validation workflow runs these alongside the Apple build, simulator, and preview checks.
+
 The **NAS integration** workflow also checks authenticated SMB scanning, byte-range
 reads, and AVPlayer playback and seeking on an Apple TV simulator. It creates a temporary
 local test share with a synthetic video; it does not connect to your NAS.

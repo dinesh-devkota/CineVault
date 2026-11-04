@@ -1,4 +1,4 @@
-# Runs the existing public validation jobs from a development-branch push.
+# Runs public validation and Android runtime tests from a development-branch push.
 # Keep these jobs aligned with ci.yml, nas-integration.yml, ui-preview.yml,
 # and android.yml. No signing credentials or store uploads are involved.
 name: Development validation
@@ -6,7 +6,14 @@ name: Development validation
 on:
   push:
     branches: [dinesh-devkota-sonepar-build-cinevault-tvos-app]
-    paths: [.github/workflows/development-validation.yml]
+    paths:
+      - .github/workflows/development-validation.yml
+      - CineVault/**
+      - CineVaultTests/**
+      - Packages/**
+      - android/**
+      - scripts/**
+      - project*.yml
   workflow_dispatch:
 
 permissions:
@@ -238,7 +245,7 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
       - name: Test, lint and assemble
-        run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: ./gradlew --no-daemon --max-workers=4 :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:lintRelease :app:assembleRelease
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -253,3 +260,97 @@ jobs:
           path: |
             android/**/build/reports/
           if-no-files-found: ignore
+
+  android-runtime:
+    name: Android TV runtime and SMB tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Enable KVM for the Android TV emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Start the synthetic SMB fixture
+        run: |
+          set -euo pipefail
+          python -m pip install -r scripts/nas-test-requirements.txt
+          python scripts/nas_fixture.py "$RUNNER_TEMP/android-nas-fixture" >"$RUNNER_TEMP/android-nas-fixture.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/android-nas-fixture.pid"
+          python - <<'PY'
+          import socket, time
+          for attempt in range(30):
+              try:
+                  with socket.create_connection(("127.0.0.1", 1445), timeout=1):
+                      break
+              except OSError:
+                  time.sleep(1)
+          else:
+              raise SystemExit("SMB fixture did not start")
+          PY
+      - name: Test on Android TV
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 36
+          target: android-tv
+          arch: x86_64
+          profile: tv_1080p
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: cd android && ./gradlew --no-daemon --max-workers=4 :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.nasHost=10.0.2.2
+      - name: Verify runtime tests executed
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import xml.etree.ElementTree as ET
+          reports = list(Path("android/app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
+          cases = [case for report in reports for case in ET.parse(report).getroot().iter("testcase")]
+          failures = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
+          skipped = sum(case.find("skipped") is not None for case in cases)
+          message = f"Android TV runtime tests: {len(cases)} executed, {failures} failed, {skipped} skipped."
+          print(message)
+          print(f"::notice title=Android runtime tests::{message}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(message + "\n")
+          for case in cases:
+              problem = case.find("failure")
+              if problem is None:
+                  problem = case.find("error")
+              if problem is not None:
+                  detail = (problem.get("message", "") + "\n" + (problem.text or ""))[:4000]
+                  detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"::error title=Android runtime test::{case.get('classname')}.{case.get('name')}: {detail}")
+          required = {"TVNavigationTest", "SecretBoxInstrumentedTest", "LibraryDatabaseTest", "MetadataMutationTest",
+                      "LibraryScannerTest", "SmbDataSourceContractTest", "SmbIntegrationTest"}
+          executed = {case.get("classname", "").rsplit(".", 1)[-1] for case in cases}
+          if not required <= executed or failures or skipped:
+              raise SystemExit("Required runtime tests did not all execute successfully: " + str(sorted(required - executed)))
+          PY
+      - name: Stop the SMB fixture
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/android-nas-fixture.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/android-nas-fixture.pid")" 2>/dev/null || true
+          fi
+      - name: Upload runtime test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinevault-android-runtime-tests
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            ${{ runner.temp }}/android-nas-fixture.log
+          if-no-files-found: error
+          retention-days: 7
