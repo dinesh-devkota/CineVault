@@ -88,7 +88,8 @@ fun RootScreen() {
                 Tab(
                     selected = index == tab,
                     onFocus = { tab = index },
-                    modifier = Modifier.focusRequester(tabFocus[index]),
+                    modifier = Modifier.focusRequester(tabFocus[index]).pointerClick { tab = index },
+                    onClick = { tab = index },
                 ) {
                     Text(
                         title,
@@ -112,6 +113,7 @@ fun RootScreen() {
 
 @Composable
 private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
+    val context = LocalContext.current
     val status by LocalContext.current.container.scanner.status.collectAsStateWithLifecycle()
     val available = remember(movies) { movies.filter { !it.isHidden && !it.isMissing }.sortedByDescending { it.addedAt } }
     val continuing = remember(movies) { LibraryQuery.continueWatching(movies).take(20) }
@@ -136,6 +138,9 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
                     "Your movie collection starts here",
                     "Add a NAS source, then add a TMDB key for artwork and details.",
                 )
+                Button(onClick = { NasSetupActivity.start(context) }, modifier = Modifier.padding(horizontal = ScreenPadding)) {
+                    Text("Find my NAS")
+                }
             }
         } else {
             if (continuing.isNotEmpty()) item { MovieRow("Continue Watching", continuing, onOpen, wide = true) }
@@ -150,7 +155,7 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
 private fun FeaturedCard(movie: MovieEntity, onClick: () -> Unit) {
     Card(
         onClick = onClick,
-        modifier = Modifier.padding(horizontal = ScreenPadding).fillMaxWidth().aspectRatio(21f / 7f),
+        modifier = Modifier.padding(horizontal = ScreenPadding).fillMaxWidth().aspectRatio(21f / 7f).pointerClick(onClick = onClick),
         shape = CardDefaults.shape(RoundedCornerShape(16.dp)),
         scale = CardDefaults.scale(focusedScale = 1.02f),
     ) {

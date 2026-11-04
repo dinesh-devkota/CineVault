@@ -43,7 +43,6 @@ import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.dineshdevkota.cinevault.core.Tmdb
@@ -104,7 +103,7 @@ fun PosterCard(movie: MovieEntity, onClick: () -> Unit, modifier: Modifier = Mod
     Column(modifier) {
         Card(
             onClick = onClick,
-            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f),
+            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).pointerClick(onClick = onClick),
             shape = CardDefaults.shape(CardShape),
         ) {
             Box(Modifier.fillMaxSize()) {
@@ -131,7 +130,7 @@ fun ContinueCard(movie: MovieEntity, onClick: () -> Unit, modifier: Modifier = M
     Column(modifier.width(300.dp)) {
         Card(
             onClick = onClick,
-            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).pointerClick(onClick = onClick),
             shape = CardDefaults.shape(CardShape),
         ) {
             Box(Modifier.fillMaxSize()) {
@@ -239,12 +238,14 @@ fun TvTextField(
     isPassword: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next,
+    enabled: Boolean = true,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier,
         singleLine = true,
+        enabled = enabled,
         label = { MobileText(label) },
         visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(

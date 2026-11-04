@@ -25,10 +25,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.tv.material3.Button
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.data.MovieEntity
@@ -51,7 +49,7 @@ fun SourcesTab(movies: List<MovieEntity>) {
         item { ScreenHeader("Sources", kicker = "YOUR NAS", trailing = status) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Button(onClick = { SourceEditorActivity.start(context, null) }) { Text("Add NAS Source") }
+                Button(onClick = { NasSetupActivity.start(context) }) { Text("Add NAS Source") }
                 OutlinedButton(
                     onClick = { container.scope.launch { container.scanner.scanAll() } },
                     enabled = !scanning && sources.isNotEmpty(),
@@ -61,7 +59,7 @@ fun SourcesTab(movies: List<MovieEntity>) {
             }
         }
         if (sources.isEmpty()) {
-            item { EmptyState("No NAS sources yet", "Add your NAS with its address, share and movie folder.") }
+            item { EmptyState("No NAS sources yet", "Find your NAS, sign in if needed, then choose your movie folder.") }
         }
         items(sources, key = { it.id }) { source ->
             SourceRow(

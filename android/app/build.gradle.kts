@@ -104,6 +104,10 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
     implementation(libs.smbj)
+    implementation(libs.dcerpc) {
+        exclude(group = "com.hierynomus", module = "smbj")
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk15on")
+    }
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.coil.compose)

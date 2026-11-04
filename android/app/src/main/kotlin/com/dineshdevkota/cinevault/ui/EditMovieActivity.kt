@@ -38,12 +38,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.Button
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.core.MovieEdits
@@ -223,7 +221,7 @@ private fun MatchCard(result: TmdbMovieSummary, onClick: () -> Unit) {
     Column(Modifier.width(150.dp)) {
         Card(
             onClick = onClick,
-            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f),
+            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).pointerClick(onClick = onClick),
             shape = CardDefaults.shape(RoundedCornerShape(10.dp)),
         ) {
             Artwork(Tmdb.imageUrl(result.posterPath, "w342"), result.title, Modifier.fillMaxSize())

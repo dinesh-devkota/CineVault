@@ -34,18 +34,29 @@ the NAS; enter its hostname or LAN address, not `localhost`.
 
 ## Connect a NAS
 
-Open **Add NAS** and provide:
+Open **Home → Find my NAS** or **Sources → Add NAS Source**. The app searches
+for SMB services advertised through Bonjour/mDNS for ten seconds. Selecting a
+device fills its address and port and tries to list shared folders as a guest.
+If access fails, enter your NAS username and password in the sign-in fields and
+retry **Find shared folders**. Choose a share, browse to your movie folder, then
+select **Use this folder & scan**. Subfolders are included in the scan.
 
-- **Name:** a label for this source.
-- **Host or IP:** the NAS hostname or LAN address.
-- **Port:** leave blank for SMB's default port, 445.
-- **Username** and **Password:** preferably a read-only NAS account. An empty
-  username selects guest access.
-- **Share:** the shared folder name, such as `media`.
-- **Folder inside share:** an optional subfolder, such as `Movies`.
+If discovery returns no devices, choose **Enter NAS address** and provide the
+NAS hostname or LAN address (not `localhost`). Port 445 is the SMB default.
+**Enter share** supports NAS accounts that can access a known share but cannot
+list all shares. Existing sources retain the manual editor and connection test.
 
-Use **Test Connection**, then **Save & Scan**. Credentials are stored encrypted.
-Do not include passwords in issue reports or screenshots.
+Discovery requires the NAS to advertise `_smb._tcp` and the network to carry
+those announcements. An emulator can reach the NAS by address while discovery
+returns nothing; it uses a virtual network. This is not evidence that the NAS
+is offline. A physical TV must also share a reachable network with the NAS.
+
+Credentials stay in memory during setup and are saved encrypted only when you
+save the source. Do not include passwords in issue reports or screenshots.
+
+TV remote/keyboard navigation uses arrows and Enter. Buttons, tabs, and movie
+cards also support pointer taps. For mouse testing, the TV emulator must expose
+a touch screen; a `no-touch` virtual device will not forward taps to the app.
 
 ## First playback test
 
@@ -107,12 +118,14 @@ enable billing.
 
 ## Validation and remaining work
 
-The development baseline passes 41 JVM tests and builds the debug APK. Lint
+The development build passes 43 JVM tests and builds the debug APK. Lint
 reports no errors and three existing warnings: `VectorRaster`,
 `DataExtractionRules`, and `ObsoleteSdkInt`.
 
-These checks do not establish real-device playback or remote navigation.
-Android TV launch, hardware playback, and real-NAS validation remain pending.
+The API 36 Android TV emulator installs and launches the app, and direct TCP
+access to a local NAS on port 445 was verified. Live pointer testing was
+interrupted before completion. NAS authentication, folder browsing, playback,
+physical-TV navigation, and physical-network discovery still need validation.
 
 Google Play billing and the commercial trial policy are not implemented for
 Android. Google Play account/product setup, internal testing, and store

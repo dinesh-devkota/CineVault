@@ -13,6 +13,7 @@ okhttp = "4.12.0"
 serialization = "1.9.0"
 coroutines = "1.10.2"
 smbj = "0.14.0"
+dcerpc = "0.12.0"
 junit = "4.13.2"
 
 [libraries]
@@ -36,6 +37,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 smbj = { group = "com.hierynomus", name = "smbj", version.ref = "smbj" }
+dcerpc = { group = "com.rapid7.client", name = "dcerpc", version.ref = "dcerpc" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]

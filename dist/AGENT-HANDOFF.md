@@ -191,3 +191,25 @@ historical snapshot, rather than a current release approval.
   validation can continue.
 - The `commercial` environment still has only `COMMERCIAL_REPO_TOKEN` as a
   secret. Do not ask the owner to paste signing credentials into chat.
+
+## Continuation — 2026-11-04 (America/Chicago)
+
+- Installed an API 36 x86_64 Android TV emulator on the owner's Windows PC.
+  Hardware acceleration is available. Reduced the virtual display to 720p,
+  enabled touch input and host GPU rendering, and installed the development APK.
+- Android now has a guided NAS setup: ten-second Bonjour/mDNS discovery,
+  address/port autofill, guest share enumeration with sign-in and manual-share
+  fallbacks, folder browsing, and validation before saving encrypted credentials
+  and starting the scan. TV Material controls now also accept pointer taps.
+- Local core/app tests, lint, and debug APK build passed. Lint still reports
+  zero errors and the same three warnings. User Escape interrupted desktop UI
+  validation; pointer behavior, authenticated NAS access, and playback are not
+  yet verified. Do not describe these as completed real-device tests.
+- The physical NAS answered an SMB Bonjour query from Windows, and direct
+  TCP access to its SMB port from the emulator succeeded. The emulator's NSD
+  search returned no devices: physical LAN announcements are not reaching this
+  emulator setup. Use manual address entry for the local NAS test; do not
+  hardcode the owner's address or credentials in the app.
+- The owner requested pushing this work to the development branch and adding
+  the same NAS setup experience to Apple TV. No main merge or store upload was
+  requested. Apple Developer membership remains unavailable.

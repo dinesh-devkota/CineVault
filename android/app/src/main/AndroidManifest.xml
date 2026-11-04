@@ -31,6 +31,10 @@
             android:name=".ui.MovieDetailActivity"
             android:exported="false" />
         <activity
+            android:name=".ui.NasSetupActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".ui.SourceEditorActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
