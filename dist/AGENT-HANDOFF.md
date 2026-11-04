@@ -191,3 +191,101 @@ historical snapshot, rather than a current release approval.
   validation can continue.
 - The `commercial` environment still has only `COMMERCIAL_REPO_TOKEN` as a
   secret. Do not ask the owner to paste signing credentials into chat.
+
+## Continuation — 2026-11-04 (UTC), cloud review and library upgrades
+
+This section supersedes earlier branch/readiness statements. The owner requested
+a deep review of both public TV apps, fixes, Infuse-inspired improvements, GitHub
+pushes, and merging development into `main` after both platforms pass validation.
+The owner explicitly chose to **leave GitHub's repository description unchanged**;
+do not follow the older instruction to edit that description.
+
+### Completed reliability review
+
+The reviewed reliability baseline `926992277097299effb7f39541e8e3944aa94887`
+was fast-forwarded to `main` after all development and Android checks passed.
+Its post-merge CI (`41772046761`), NAS integration (`41772046731`), and Android
+(`41772046660`, 21 runtime tests) also passed.
+
+- Both platforms: filename/release-tag parsing, folder TMDB tags, sample/trailer
+  exclusion, old release years, and empty automatic-match input are corrected.
+- tvOS: source-generation checks reject stale SMB/scanner results without
+  disconnecting acquired reads; playback stop is idempotent and ignores late
+  callbacks. Metadata intent tracking preserves manual selections, reset restores
+  explicit filename/folder tags, and deleted movies cannot receive late responses.
+- Android: failed credential decryption reports an actionable error instead of
+  silently using an empty password or replacing its key. Room metadata/scanning
+  mutations preserve manual choices and reject changed/deleted source state.
+  Ref-counted SMB sessions retain active reads and invalidate stale setup/retries;
+  Media3 byte ranges, EOF, and failed-open cleanup follow the DataSource contract.
+- Android progress saves, manual edits, and resume reads share ordering. Player
+  recreation preserves pause state. TV tab restoration waits for layout and
+  acquires window/view focus before restoring the selected tab.
+
+### Personal library upgrades
+
+Both tvOS and Android TV now support a persistent local Watchlist with a detail
+action, Home shelf, and Movies filter. Watching/resetting progress does not remove
+an item from the Watchlist. Movies also saves genre, NAS source, and decade filters;
+deleting a selected source safely falls back to All sources.
+
+Android uses an explicit non-destructive Room 1-to-2 migration with a default-false
+Watchlist column. tvOS uses an additive default-false SwiftData property. Migration
+tests reopen frozen legacy stores and preserve existing metadata, progress, and
+source/credential mappings. Field-specific updates prevent later scans/metadata
+from overwriting Watchlist state.
+
+Android filter controls remain composed outside the recycled poster grid when
+results become empty, preserving D-pad focus. The Movies layout fits a full row
+below the expanded filters; Home/Search retain their existing poster size.
+
+Official Firecore GitHub sources were accessible, including InfuseSync. Firecore's
+website/support pages and the App Store listing were blocked by this environment's
+network policy, so a complete current Infuse feature comparison was not verified.
+No Firecore artwork/code, cloud sync, Trakt, or new media-server integration was added.
+
+### Validation and branch result
+
+Upgrade source revision `b206a00de35be1eb5a3d99c78ec9e8ff089f65f7` passed all
+five Development validation jobs in [run 41778573506](https://github.com/dinesh-devkota/CineVault/actions/runs/41778573506)
+and both Android jobs in [run 41778573525](https://github.com/dinesh-devkota/CineVault/actions/runs/41778573525).
+All 26 Android runtime tests executed successfully, with zero failures or skips.
+The following handoff-only commit fast-forwards this reviewed history to `main`
+and keeps the development branch at the same commit. Post-merge results are
+available from the main CI, NAS integration, and Android workflows.
+
+The final source coverage is 67 JVM tests (38 core, 29 app), 19 Swift core tests,
+41 tvOS app tests, 26 Android instrumentation tests, and 5 Python helper tests.
+Android debug/release lint has zero errors and the same three documented warnings.
+Debug/release APKs and the unsigned community AAB build successfully. Hosted Android
+tests include H.264 frames and an 8-second seek over the synthetic SMB share,
+credentials, migration, persistence, and remote-control navigation.
+
+One hosted emulator attempt timed out before boot with zero tests. The Android
+runtime job now pins Ubuntu 24.04 and waits for udev device-permission updates
+before checking KVM access; a premature KVM check was corrected. These failed
+infrastructure runs do not count as executed application tests.
+
+The Watchlist UI test refreshes API 34+ accessibility caches before querying exact
+visible text. UIAutomator 2.3 otherwise searched stale Compose labels, while its
+diagnostic getters refreshed those same nodes. This produced a false failure
+despite the expected text, focused button, and saved filter being present. The
+test keeps its D-pad sequence and timeout, requires nonempty visible bounds,
+and lets lookup exceptions fail instead of treating them as absent text.
+
+### Environment and remaining limits
+
+The Linux toolchain and helpers are in `/workspace/.cinevault-env`; follow
+`docs/CLOUD-DEVELOPMENT.md`. Keep the existing checkout and preserve current work.
+Use the activation script and `flock /tmp/cinevault-gradle.lock` for shared Gradle
+runs. This machine has no Android emulator or macOS/Xcode; platform runtime tests
+run through GitHub Actions. Git HTTPS reads/pushes work with existing injected
+authentication. GitHub API access remains blocked here; do not proxy API requests
+through CI or ask for a token solely because `gh` cannot reach the API.
+
+Physical Apple/Android TV, real NAS variants, broad codec coverage, signing,
+TestFlight/Play publication, and Android billing remain separate work. The private
+commercial validation described above is historical and was not repeated by this
+public review. No signing/store upload or repository description edit occurred.
+Saving the onboarding configuration does not publish the environment or prove
+restoration in a fresh task; publication remains a user action in environment settings.
