@@ -24,7 +24,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,6 +38,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -73,29 +73,21 @@ fun RootScreen() {
 
     var tabRowFocused by remember { mutableStateOf(false) }
     var initialFocusRequested by remember { mutableStateOf(false) }
+    var tabsPlaced by remember { mutableStateOf(false) }
     val view = LocalView.current
-    var ownerFocused by remember(view) { mutableStateOf(view.hasFocus()) }
     val windowFocused = LocalWindowInfo.current.isWindowFocused
-
-    DisposableEffect(view) {
-        val observer = view.viewTreeObserver
-        val listener = android.view.ViewTreeObserver.OnGlobalFocusChangeListener { _, _ ->
-            ownerFocused = view.hasFocus()
-        }
-        observer.addOnGlobalFocusChangeListener(listener)
-        onDispose { if (observer.isAlive) observer.removeOnGlobalFocusChangeListener(listener) }
-    }
 
     // Like tvOS: Back first returns to the tab bar, then to Home, then leaves the app.
     BackHandler(enabled = !tabRowFocused || tab != 0) {
         if (tabRowFocused) tab = 0
         tabFocus[tab].requestFocus()
     }
-    // A recreated window can have focus while its Compose view does not. Acquire
-    // Android view focus before restoring the Compose target, so the first remote
-    // key navigates. Preserve the saved tab across the owner's initial focus search.
-    LaunchedEffect(windowFocused, ownerFocused) {
-        if (windowFocused && !initialFocusRequested) {
+    // TabRow subcomposes its tabs during layout, after this effect can first run.
+    // Wait for their placement before restoring focus. A recreated window can
+    // also have focus while its Compose view does not; acquire the owner first.
+    LaunchedEffect(windowFocused, tabsPlaced) {
+        if (windowFocused && tabsPlaced && !initialFocusRequested) {
+            // The owner's initial focus search can select another tab.
             val selectedTab = tab
             if (!view.hasFocus()) view.requestFocus()
             initialFocusRequested = tabFocus[selectedTab].requestFocus() && view.hasFocus()
@@ -107,6 +99,7 @@ fun RootScreen() {
             selectedTabIndex = tab,
             modifier = Modifier
                 .padding(start = ScreenPadding, top = 20.dp, bottom = 4.dp)
+                .onGloballyPositioned { tabsPlaced = true }
                 .onFocusChanged { tabRowFocused = it.hasFocus },
         ) {
             tabs.forEachIndexed { index, title ->
