@@ -25,7 +25,7 @@ The managed Linux environment has cache and tool activation instructions in
 - Media3 DataSource byte-range/EOF behavior and cleanup after a failed open.
 - Authenticated SMB scans, range reads, bad credentials, and reconnection.
 
-The `Development validation` workflow uses an Android TV API 36 x86_64 emulator
+The `Android TV` workflow uses an Android TV API 36 x86_64 emulator
 and a synthetic SMB share. The fixture has no access to a user's NAS or secrets.
 For an emulator on your machine:
 
