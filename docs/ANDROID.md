@@ -118,14 +118,24 @@ enable billing.
 
 ## Validation and remaining work
 
-The development build passes 43 JVM tests and builds the debug APK. Lint
-reports no errors and three existing warnings: `VectorRaster`,
-`DataExtractionRules`, and `ObsoleteSdkInt`.
+The previously validated development baseline passes 67 JVM tests (38 core and
+29 app). NAS setup adds two share-filter tests. Debug and release lint report
+no errors and three existing warnings: `VectorRaster`, `DataExtractionRules`,
+and `ObsoleteSdkInt`.
 
-The API 36 Android TV emulator installs and launches the app, and direct TCP
-access to a local NAS on port 445 was verified. Live pointer testing was
-interrupted before completion. NAS authentication, folder browsing, playback,
-physical-TV navigation, and physical-network discovery still need validation.
+The **Android TV** workflow also runs an Android TV API 36 emulator with a
+synthetic SMB share. Its runtime suite covers app launch, remote navigation,
+Watchlist and saved filters, database upgrades, encrypted credentials, and video
+playback and seeking over SMB. Check the workflow result for the revision being
+installed; builds and JVM tests alone do not validate these runtime behaviors.
+See [TESTING.md](TESTING.md) for coverage and local emulator instructions.
+
+The local Windows API 36 TV emulator installs and launches the NAS setup build.
+Direct TCP access to a real NAS on port 445 succeeds. The NAS advertises SMB to
+Windows, but its announcements do not reach this emulator's discovery search;
+use manual address entry for this setup. Live pointer testing was interrupted.
+Authenticated setup, physical-TV navigation, real-NAS playback, discovery on
+physical hardware, and device-specific codec compatibility still need testing.
 
 Google Play billing and the commercial trial policy are not implemented for
 Android. Google Play account/product setup, internal testing, and store

@@ -33,6 +33,7 @@ final class LibraryScanner: ObservableObject {
         status = "Scanning \(source.name)…"
         do {
             let files = try await scanVideos(source.config())
+            try Task.checkCancellation()
             var existing = Dictionary(source.movies.map { ($0.filePath, $0) }, uniquingKeysWith: { a, _ in a })
             var added = 0
             for file in files {
@@ -64,6 +65,8 @@ final class LibraryScanner: ObservableObject {
             } catch {
                 status = "\(scanStatus). Metadata update failed: \(error.localizedDescription)"
             }
+        } catch is CancellationError {
+            status = "Scan cancelled for \(source.name)."
         } catch {
             status = "Scan failed for \(source.name): \(error.localizedDescription)"
         }

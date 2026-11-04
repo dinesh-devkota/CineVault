@@ -153,22 +153,26 @@ final class SMBIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testResetDoesNotDisconnectAnAcquiredRead() async throws {
+    func testResetLetsAcquiredReadFinishBeforeRejectingStaleResult() async throws {
         for resetBySourceID in [false, true] {
             let config = configuration()
             let service = SMBService(timeout: 3)
             let gate = ReadGate()
             let acquired = expectation(description: "Read acquired the cached connection")
+            let completed = expectation(description: "Acquired read finishes on its retained connection")
             let read = Task {
                 try await service.withManager(config) { manager in
                     if await gate.nextAttempt() == 1 {
                         acquired.fulfill()
                         await gate.wait()
                     }
-                    return try await manager.contents(
+                    let bytes = try await manager.contents(
                         atPath: "Movies/Feature (2020)/bytes.bin",
                         range: UInt64(3)..<UInt64(7), progress: nil
                     )
+                    XCTAssertEqual(bytes, Data("3456".utf8), "Reset must leave the acquired connection usable until its read finishes.")
+                    completed.fulfill()
+                    return bytes
                 }
             }
             defer { Task { await gate.release() } }
@@ -185,8 +189,13 @@ final class SMBIntegrationTests: XCTestCase {
             )
             XCTAssertEqual(fresh, Data("012".utf8))
             await gate.release()
-            let bytes = try await read.value
-            XCTAssertEqual(bytes, Data("3456".utf8))
+            do {
+                _ = try await read.value
+                XCTFail("The completed read belongs to the previous source generation.")
+            } catch {
+                XCTAssertEqual(error as? SMBError, .sourceChanged)
+            }
+            await fulfillment(of: [completed], timeout: 15)
             let attempts = await gate.attempts
             XCTAssertEqual(attempts, 1, "Reset must not force an acquired read to reconnect.")
             await service.reset(config)
@@ -224,6 +233,100 @@ final class SMBIntegrationTests: XCTestCase {
         XCTAssertEqual(size, 10)
         let attempts = await gate.attempts
         XCTAssertEqual(attempts, 2, "The next request must establish a new connection.")
+        await service.reset(config)
+    }
+
+    @MainActor
+    func testResetDuringFailedOperationDoesNotReconnectStaleSource() async throws {
+        let config = configuration()
+        let gate = ReadGate()
+        let operationStarted = expectation(description: "Operation is using the original connection")
+        let service = SMBService(timeout: 3) { manager, share in
+            _ = await gate.nextAttempt()
+            try await manager.connectShare(name: share)
+        }
+        let operation = Task {
+            try await service.withManager(config) { _ -> Data in
+                operationStarted.fulfill()
+                await gate.wait()
+                throw ForcedFailure.expected
+            }
+        }
+        defer { Task { await gate.release() } }
+        await fulfillment(of: [operationStarted], timeout: 15)
+
+        await service.reset(sourceID: config.id)
+        await gate.release()
+        do {
+            _ = try await operation.value
+            XCTFail("An operation invalidated by a source reset must fail.")
+        } catch {
+            XCTAssertEqual(error as? SMBError, .sourceChanged)
+        }
+        let staleAttempts = await gate.attempts
+        XCTAssertEqual(staleAttempts, 1, "A failed operation must not reconnect the old source after reset.")
+
+        let size = try await service.fileSize(config, path: "Movies/Feature (2020)/bytes.bin")
+        XCTAssertEqual(size, 10)
+        let attempts = await gate.attempts
+        XCTAssertEqual(attempts, 2, "The next operation must establish its own connection.")
+        await service.reset(config)
+    }
+
+    @MainActor
+    func testResetDuringSuccessfulOperationRejectsStaleResult() async throws {
+        let config = configuration()
+        let service = SMBService(timeout: 3)
+        let gate = ReadGate()
+        let operationStarted = expectation(description: "Read has completed before the source reset")
+        let operation = Task {
+            try await service.withManager(config) { manager in
+                let bytes = try await manager.contents(
+                    atPath: "Movies/Feature (2020)/bytes.bin",
+                    range: UInt64(3)..<UInt64(7), progress: nil
+                )
+                operationStarted.fulfill()
+                await gate.wait()
+                return bytes
+            }
+        }
+        defer { Task { await gate.release() } }
+        await fulfillment(of: [operationStarted], timeout: 15)
+
+        await service.reset(sourceID: config.id)
+        await gate.release()
+        do {
+            _ = try await operation.value
+            XCTFail("A result from the previous source generation must not be returned.")
+        } catch {
+            XCTAssertEqual(error as? SMBError, .sourceChanged)
+        }
+        await service.reset(config)
+    }
+
+    func testInvalidByteRangesAreRejectedBeforeReading() async throws {
+        let config = configuration()
+        let service = SMBService(timeout: 3)
+        for (offset, length) in [(Int64(-1), 1), (Int64(0), -1), (Int64.max, 1)] {
+            do {
+                _ = try await service.read(config, path: "Movies/Feature (2020)/bytes.bin", offset: offset, length: length)
+                XCTFail("An invalid byte range must not be read.")
+            } catch {
+                XCTAssertEqual(error as? SMBError, .invalidByteRange)
+            }
+        }
+        let empty = try await service.read(config, path: "does-not-exist", offset: 0, length: 0)
+        XCTAssertTrue(empty.isEmpty)
+
+        let loader = SMBResourceLoader(config: config, path: "Movies/Feature (2020)/bytes.bin")
+        for (start, end) in [(Int64(-1), Int64(0)), (Int64(10), Int64(9))] {
+            do {
+                try await loader.streamBytes(from: start, to: end) { _ in XCTFail("Invalid ranges must not produce data.") }
+                XCTFail("An invalid stream range must fail.")
+            } catch {
+                XCTAssertEqual(error as? SMBError, .invalidByteRange)
+            }
+        }
         await service.reset(config)
     }
 

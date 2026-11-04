@@ -38,9 +38,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Card
@@ -69,19 +73,34 @@ fun RootScreen() {
     val openMovie: (MovieEntity) -> Unit = { MovieDetailActivity.start(context, it.id) }
 
     var tabRowFocused by remember { mutableStateOf(false) }
+    var initialFocusRequested by remember { mutableStateOf(false) }
+    var tabsPlaced by remember { mutableStateOf(false) }
+    val view = LocalView.current
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
 
     // Like tvOS: Back first returns to the tab bar, then to Home, then leaves the app.
     BackHandler(enabled = !tabRowFocused || tab != 0) {
         if (tabRowFocused) tab = 0
         tabFocus[tab].requestFocus()
     }
-    LaunchedEffect(Unit) { tabFocus[tab].requestFocus() }
+    // TabRow subcomposes its tabs during layout, after this effect can first run.
+    // Wait for their placement before restoring focus. A recreated window can
+    // also have focus while its Compose view does not; acquire the owner first.
+    LaunchedEffect(windowFocused, tabsPlaced) {
+        if (windowFocused && tabsPlaced && !initialFocusRequested) {
+            // The owner's initial focus search can select another tab.
+            val selectedTab = tab
+            if (!view.hasFocus()) view.requestFocus()
+            initialFocusRequested = tabFocus[selectedTab].requestFocus() && view.hasFocus()
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         TabRow(
             selectedTabIndex = tab,
             modifier = Modifier
                 .padding(start = ScreenPadding, top = 20.dp, bottom = 4.dp)
+                .onGloballyPositioned { tabsPlaced = true }
                 .onFocusChanged { tabRowFocused = it.hasFocus },
         ) {
             tabs.forEachIndexed { index, title ->
@@ -117,6 +136,7 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
     val status by LocalContext.current.container.scanner.status.collectAsStateWithLifecycle()
     val available = remember(movies) { movies.filter { !it.isHidden && !it.isMissing }.sortedByDescending { it.addedAt } }
     val continuing = remember(movies) { LibraryQuery.continueWatching(movies).take(20) }
+    val watchlist = remember(movies) { LibraryQuery.watchlist(movies).take(20) }
     val unwatched = remember(available) { available.filter { !it.isWatched }.take(20) }
     val featured = remember(available) {
         val fresh = available.filter { !it.isWatched && !it.isInProgress }
@@ -144,6 +164,7 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
             }
         } else {
             if (continuing.isNotEmpty()) item { MovieRow("Continue Watching", continuing, onOpen, wide = true) }
+            if (watchlist.isNotEmpty()) item { MovieRow("Watchlist", watchlist, onOpen) }
             featured?.let { movie -> item { FeaturedCard(movie, onClick = { onOpen(movie) }) } }
             item { MovieRow("Recently Added", available.take(20), onOpen) }
             if (unwatched.isNotEmpty()) item { MovieRow("Unwatched", unwatched, onOpen) }
@@ -191,9 +212,9 @@ private fun FeaturedCard(movie: MovieEntity, onClick: () -> Unit) {
 }
 
 @Composable
-private fun MovieGrid(content: LazyGridScope.() -> Unit) {
+private fun MovieGrid(minimumPosterWidth: Dp = PosterWidth, content: LazyGridScope.() -> Unit) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(PosterWidth),
+        columns = GridCells.Adaptive(minimumPosterWidth),
         contentPadding = PaddingValues(start = ScreenPadding, end = ScreenPadding, bottom = 48.dp),
         horizontalArrangement = Arrangement.spacedBy(28.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
@@ -211,16 +232,40 @@ private fun LazyGridScope.posters(movies: List<MovieEntity>, onOpen: (MovieEntit
 
 @Composable
 private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
-    val settings = LocalContext.current.container.settings
+    val container = LocalContext.current.container
+    val settings = container.settings
+    val sources by remember { container.database.sources().observeAll() }.collectAsStateWithLifecycle(initialValue = null)
     var sort by remember { mutableStateOf(settings.librarySort) }
     var filter by remember { mutableStateOf(settings.libraryFilter) }
-    var genre by rememberSaveable { mutableStateOf<String?>(null) }
+    var genre by remember { mutableStateOf(settings.libraryGenre) }
+    var sourceId by remember { mutableStateOf(settings.librarySourceId) }
+    var decade by remember { mutableStateOf(settings.libraryDecade) }
     val genres = remember(movies) { listOf<String?>(null) + LibraryQuery.genres(movies) }
-    val visible = remember(movies, sort, filter, genre) { LibraryQuery.visible(movies, sort, filter, genre) }
+    val decades = remember(movies) { listOf<Int?>(null) + LibraryQuery.decades(movies) }
+    // Wait for the first source result before clearing a saved selection. An empty
+    // loading placeholder must not erase the user's preference on every launch.
+    val selectedSourceId = sourceId.takeIf { id -> sources?.any { it.id == id } != false }
+    LaunchedEffect(sources, sourceId) {
+        if (sources != null && selectedSourceId != sourceId) {
+            sourceId = null
+            settings.librarySourceId = null
+        }
+    }
+    val visible = remember(movies, sort, filter, genre, selectedSourceId, decade) {
+        LibraryQuery.visible(movies, sort, filter, genre, selectedSourceId, decade)
+    }
 
-    MovieGrid {
-        fullWidth { ScreenHeader("Movies", kicker = "YOUR COLLECTION", trailing = "${visible.size} titles") }
-        fullWidth {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ScreenHeader(
+            "Movies", Modifier.padding(horizontal = ScreenPadding),
+            kicker = "YOUR COLLECTION", trailing = "${visible.size} titles",
+        )
+        // Keep focused filters outside the recycled result items. Replacing all
+        // posters with an empty state must not dispose the control being used.
+        Column(
+            Modifier.padding(horizontal = ScreenPadding),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 CycleButton("Sort", sort, LibrarySort.entries, { it.label }, {
                     sort = it
@@ -230,13 +275,36 @@ private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) 
                     filter = it
                     settings.libraryFilter = it
                 })
-                CycleButton("Genre", genre, genres, { it ?: "All" }, { genre = it })
+                CycleButton("Genre", genre, genres, { it ?: "All" }, {
+                    genre = it
+                    settings.libraryGenre = it
+                }, Modifier.width(240.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                CycleButton("Source", selectedSourceId, listOf<String?>(null) + sources.orEmpty().map { it.id }, { id ->
+                    sources?.firstOrNull { it.id == id }?.name ?: "All sources"
+                }, {
+                    sourceId = it
+                    settings.librarySourceId = it
+                }, Modifier.width(320.dp))
+                CycleButton("Decade", decade, decades, { it?.let { year -> "${year}s" } ?: "All decades" }, {
+                    decade = it
+                    settings.libraryDecade = it
+                })
             }
         }
-        when {
-            movies.isEmpty() -> fullWidth { EmptyState("No movies yet", "Add your NAS in the Sources tab.") }
-            visible.isEmpty() -> fullWidth { EmptyState("No matching movies", "Try another filter or genre.") }
-            else -> posters(visible, onOpen)
+        Box(Modifier.weight(1f)) {
+            // Five columns on a 960dp-wide TV leave room for a complete poster
+            // and its labels beneath the persistent filter controls.
+            MovieGrid(minimumPosterWidth = 148.dp) {
+                when {
+                    movies.isEmpty() -> fullWidth { EmptyState("No movies yet", "Add your NAS in the Sources tab.") }
+                    visible.isEmpty() -> fullWidth {
+                        EmptyState("No matching movies", "Try another filter, source, decade or genre.")
+                    }
+                    else -> posters(visible, onOpen)
+                }
+            }
         }
     }
 }

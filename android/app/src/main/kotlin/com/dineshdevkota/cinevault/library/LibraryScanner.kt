@@ -67,6 +67,9 @@ class LibraryScanner(
             val files = scanVideos(source.config(secrets))
             val movies = database.movies()
             val added = database.withTransaction {
+                // An edit/delete can finish while the NAS operation is suspended. Never apply
+                // the old share's results to the replacement source (or recreate deleted rows).
+                if (database.sources().get(source.id) != source) return@withTransaction null
                 val diff = LibrarySync.diff(movies.forSource(source.id), files) { it.filePath }
                 diff.present.forEach { (movie, file) -> movies.markPresent(movie.id, file.size) }
                 diff.missing.forEach { movies.markMissing(it.id) }
@@ -88,6 +91,10 @@ class LibraryScanner(
                 }
                 database.sources().setLastScan(source.id, System.currentTimeMillis())
                 diff.added.size
+            }
+            if (added == null) {
+                statusFlow.value = "${source.name} changed during the scan. Scan the source again."
+                return
             }
             val scanStatus = "${source.name}: ${files.size} movies ($added new)"
             statusFlow.value = scanStatus

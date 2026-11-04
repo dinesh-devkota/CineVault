@@ -92,7 +92,13 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
         share = source.share
         rootPath = source.rootPath
         username = source.username
-        password = withContext(Dispatchers.Default) { container.secrets.decrypt(source.encryptedPassword) }
+        try {
+            password = withContext(Dispatchers.IO) { container.secrets.decrypt(source.encryptedPassword) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            message = e.message ?: "Could not read the saved password. Enter it again."
+        }
         loaded = true
     }
     if (!loaded) return

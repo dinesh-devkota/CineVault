@@ -14,6 +14,11 @@ class FilenameParserTest {
         assertEquals(ParsedMovieName("Inception", 2010), FilenameParser.parse("Inception (2010).mp4"))
     }
 
+    @Test fun earlyCinemaReleaseYear() {
+        assertEquals(ParsedMovieName("Roundhay Garden Scene", 1888),
+            FilenameParser.parse("Roundhay.Garden.Scene.1888.mp4"))
+    }
+
     @Test fun titleThatIsAYear() {
         assertEquals(ParsedMovieName("1917", 2019), FilenameParser.parse("1917 (2019) [2160p].mkv"))
         assertEquals(ParsedMovieName("2001 A Space Odyssey", 1968), FilenameParser.parse("2001.A.Space.Odyssey.1968.mkv"))
@@ -30,6 +35,18 @@ class FilenameParserTest {
 
     @Test fun tmdbTag() {
         assertEquals(ParsedMovieName("Alien", 1979, 348), FilenameParser.parse("Alien (1979) {tmdb-348}.mkv"))
+    }
+
+    @Test fun releaseYearPreservesTitleWordsThatAreAlsoReleaseTags() {
+        assertEquals(ParsedMovieName("Cam", 2018), FilenameParser.parse("Cam (2018).mp4"))
+        assertEquals(ParsedMovieName("The Web", 1947), FilenameParser.parse("The.Web.1947.1080p.mkv"))
+    }
+
+    @Test fun folderTmdbTagIsInheritedWithoutReplacingFileTitleOrYear() {
+        assertEquals(ParsedMovieName("Alien", 1979, 348),
+            FilenameParser.parse("Alien (1979) {tmdb-348}/Alien.1979.mp4"))
+        assertEquals(ParsedMovieName("Aliens", 1986, 679),
+            FilenameParser.parse("Alien (1979) {tmdb-348}/Aliens.1986.{tmdb-679}.mp4"))
     }
 
     @Test fun bracketTags() {
@@ -60,5 +77,11 @@ class VideoFileTest {
         assertFalse(VideoFile.isPlayable("a.wmv"))
         assertTrue(VideoFile.isVideo("a.iso"))
         assertFalse(VideoFile.isVideo(".mkv"))
+    }
+
+    @Test fun spaceSeparatedExtrasAreNotIndexed() {
+        assertFalse(VideoFile.shouldIndex("Movies/Heat (1995)/Heat - sample.mp4", big))
+        assertFalse(VideoFile.shouldIndex("Movies/Heat (1995)/Heat trailer.mp4", big))
+        assertTrue(VideoFile.shouldIndex("Movies/Heat (1995)/Heat.mp4", big))
     }
 }

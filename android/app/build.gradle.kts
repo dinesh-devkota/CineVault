@@ -23,6 +23,7 @@ android {
         applicationId = "com.dineshdevkota.cinevault"
         minSdk = 26
         targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = providers.gradleProperty("cinevault.versionCode").orNull?.toInt() ?: 1
         versionName = providers.gradleProperty("cinevault.versionName").orNull ?: "1.0"
     }
@@ -114,4 +115,8 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.uiautomator)
 }

@@ -1,3 +1,4 @@
+import CineVaultCore
 import Foundation
 import SwiftData
 
@@ -88,6 +89,7 @@ final class Movie {
     var lastPlayedAt: Date?
     var isHidden: Bool = false
     var isMissing: Bool = false
+    var isWatchlisted: Bool = false
 
     var source: MediaSource?
 
@@ -109,6 +111,24 @@ final class Movie {
     func setTitle(_ newTitle: String) {
         title = newTitle
         sortTitle = Movie.makeSortTitle(newTitle)
+    }
+
+    func resetToFileName() {
+        let parsed = FilenameParser.parse(path: filePath)
+        parsedTitle = parsed.title
+        parsedYear = parsed.year
+        isLocked = false
+        tmdbID = parsed.tmdbID
+        setTitle(parsedTitle.isEmpty ? fileName : parsedTitle)
+        year = parsedYear
+        overview = nil
+        tagline = nil
+        posterPath = nil
+        backdropPath = nil
+        genres = []
+        runtimeMinutes = nil
+        rating = nil
+        metadataFetched = false
     }
 
     static func makeSortTitle(_ title: String) -> String {

@@ -224,7 +224,7 @@ fun <T> CycleButton(
         onClick = { if (options.isNotEmpty()) onChange(options[(options.indexOf(value) + 1) % options.size]) },
         modifier = modifier,
     ) {
-        Text("$label: ${text(value)}")
+        Text("$label: ${text(value)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

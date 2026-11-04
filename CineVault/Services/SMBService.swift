@@ -10,6 +10,7 @@ struct RemoteFile: Sendable {
 enum SMBError: LocalizedError, Equatable {
     case invalidServer
     case invalidFileSize
+    case invalidByteRange
     case sourceChanged
     case unexpectedEndOfFile
 
@@ -17,7 +18,8 @@ enum SMBError: LocalizedError, Equatable {
         switch self {
         case .invalidServer: return "Invalid server address."
         case .invalidFileSize: return "The NAS file is empty or its size could not be read."
-        case .sourceChanged: return "The NAS source changed while connecting. Retry."
+        case .invalidByteRange: return "The requested NAS file byte range is invalid."
+        case .sourceChanged: return "The NAS source changed during the operation. Retry."
         case .unexpectedEndOfFile: return "The NAS file ended unexpectedly. Rescan the source and retry."
         }
     }
@@ -74,23 +76,35 @@ actor SMBService {
     /// Retries once with a fresh connection (NAS may drop idle sessions).
     func withManager<T>(_ config: SourceConfig, _ body: (SMB2Manager) async throws -> T) async throws -> T {
         try Task.checkCancellation()
+        let generation = generations[config.id, default: 0]
+        func checkSource() throws {
+            try Task.checkCancellation()
+            guard generations[config.id, default: 0] == generation else { throw SMBError.sourceChanged }
+        }
         var usedManager: SMB2Manager?
         do {
             let manager = try await manager(for: config)
             usedManager = manager
-            return try await body(manager)
+            try checkSource()
+            let result = try await body(manager)
+            try checkSource()
+            return result
         } catch is CancellationError {
             throw CancellationError()
         } catch SMBError.sourceChanged {
             throw SMBError.sourceChanged
         } catch {
-            try Task.checkCancellation()
+            try checkSource()
             if let usedManager, managers[config] === usedManager {
                 // Other reads may still be using this connection.
                 managers.removeValue(forKey: config)
             }
-            try Task.checkCancellation()
-            return try await body(try await manager(for: config))
+            try checkSource()
+            let manager = try await manager(for: config)
+            try checkSource()
+            let result = try await body(manager)
+            try checkSource()
+            return result
         }
     }
 
@@ -135,7 +149,11 @@ actor SMBService {
     }
 
     func read(_ config: SourceConfig, path: String, offset: Int64, length: Int) async throws -> Data {
-        try await withManager(config) { manager in
+        guard offset >= 0, length >= 0, Int64(length) <= Int64.max - offset else {
+            throw SMBError.invalidByteRange
+        }
+        guard length > 0 else { return Data() }
+        return try await withManager(config) { manager in
             let lower = UInt64(offset)
             return try await manager.contents(atPath: path, range: lower..<(lower + UInt64(length)), progress: nil)
         }

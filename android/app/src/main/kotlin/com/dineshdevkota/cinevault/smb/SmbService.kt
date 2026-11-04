@@ -12,6 +12,7 @@ import com.hierynomus.security.bc.BCSecurityProvider
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
+import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.share.File
@@ -22,8 +23,8 @@ import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
 import java.util.EnumSet
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 
 /** Snapshot of a source's connection settings (with the decrypted password) used off the main thread. */
@@ -42,11 +43,24 @@ data class SourceConfig(
 class SmbException(message: String) : IOException(message)
 
 /** An open NAS file. Close it to release the SMB handle. */
-class RemoteHandle internal constructor(private val file: File, val length: Long) : Closeable {
-    /** Read-ahead stream starting at [position]; skipping only moves the offset, so seeking is cheap. */
-    fun stream(position: Long): InputStream = file.inputStream.also { if (position > 0) it.skip(position) }
+interface RemoteHandle : Closeable {
+    val length: Long
+    fun stream(position: Long): InputStream
+}
 
-    override fun close() = file.close()
+private class SmbRemoteHandle(
+    private val file: File,
+    override val length: Long,
+    private val session: Closeable,
+) : RemoteHandle {
+    private val closed = AtomicBoolean()
+    /** Read-ahead stream starting at [position]; skipping only moves the offset, so seeking is cheap. */
+    override fun stream(position: Long): InputStream = file.inputStream.also { if (position > 0) it.skip(position) }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        try { file.close() } finally { session.close() }
+    }
 }
 
 /**
@@ -63,15 +77,18 @@ class SmbService(
             .build(),
     ),
 ) {
-    private class Connected(val session: Session, val share: DiskShare) {
+    private class Connected(val connection: Connection, val session: Session, val share: DiskShare) {
         fun close() {
             runCatching { share.close() }
             runCatching { session.close() }
+            // SMBClient.connect() leases its cached connection. Session.close() only logs off.
+            runCatching { connection.close() }
         }
     }
 
-    private val shares = ConcurrentHashMap<SourceConfig, Connected>()
-    private val locks = ConcurrentHashMap<String, Any>()
+    private val sessions = SmbSessionCache<SourceConfig, Connected>(
+        sourceId = { it.id }, isValid = { it.share.isConnected }, connect = ::connect, disconnect = Connected::close,
+    )
 
     private fun connect(config: SourceConfig): Connected {
         val host = normalizedHost(config.host)
@@ -90,55 +107,71 @@ class SmbService(
                 session = connection.authenticate(context)
                 val share = session.connectShare(config.share.trim('/', '\\')) as? DiskShare
                     ?: throw SmbException("\"${config.share}\" is not a file share.")
-                return Connected(session, share)
+                return Connected(connection, session, share)
             } catch (e: Exception) {
                 runCatching { session?.close() }
                 if (failure == null) failure = e
             }
         }
+        runCatching { connection.close() }
         throw failure ?: SmbException("Could not connect to ${config.host}.")
     }
 
-    private fun share(config: SourceConfig): DiskShare {
-        shares[config]?.takeIf { it.share.isConnected }?.let { return it.share }
-        synchronized(locks.getOrPut(config.id) { Any() }) {
-            shares[config]?.takeIf { it.share.isConnected }?.let { return it.share }
-            val connected = connect(config)
-            shares.put(config, connected)?.close()
-            return connected.share
+    private fun <T> withSessionBlocking(
+        config: SourceConfig,
+        closeInvalidResult: (T) -> Unit = {},
+        body: (SessionLease<Connected>) -> T,
+    ): T {
+        val operation = sessions.operation(config)
+        for (attempt in 0..1) {
+            val lease = operation.acquire()
+            try {
+                val result = body(lease)
+                try { operation.checkCurrent() } catch (e: SourceResetException) {
+                    closeInvalidResult(result)
+                    throw e
+                }
+                return result
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                operation.checkCurrent()
+                if (attempt == 1 || !isStaleSession(e)) throw e
+                operation.invalidate(lease)
+            } finally { lease.close() }
+        }
+        error("Unreachable SMB retry")
+    }
+
+    /** Retries a stale session once, unless a source reset invalidated the captured settings. */
+    fun <T> withShareBlocking(config: SourceConfig, body: (DiskShare) -> T): T =
+        withSessionBlocking(config) { body(it.value.share) }
+
+    suspend fun <T> withShare(config: SourceConfig, body: suspend (DiskShare) -> T): T {
+        val operation = sessions.operation(config)
+        return withContext(Dispatchers.IO) {
+            for (attempt in 0..1) {
+                coroutineContext.ensureActive()
+                val lease = operation.acquire()
+                try {
+                    // Setup may block; cancellation during it must not start another NAS operation.
+                    coroutineContext.ensureActive()
+                    val result = body(lease.value.share)
+                    coroutineContext.ensureActive()
+                    operation.checkCurrent()
+                    return@withContext result
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    operation.checkCurrent()
+                    if (attempt == 1 || !isStaleSession(e)) throw e
+                    operation.invalidate(lease)
+                } finally { lease.close() }
+            }
+            error("Unreachable SMB retry")
         }
     }
 
-    /** Runs [body] with the source's share, retrying once on a fresh session if the old one went stale. */
-    fun <T> withShareBlocking(config: SourceConfig, body: (DiskShare) -> T): T {
-        val share = share(config)
-        return try {
-            body(share)
-        } catch (e: Exception) {
-            if (!isStaleSession(e)) throw e
-            // Drop it from the cache without closing: other reads may still be using it.
-            shares[config]?.takeIf { it.share === share }?.let { shares.remove(config, it) }
-            body(share(config))
-        }
-    }
-
-    suspend fun <T> withShare(config: SourceConfig, body: suspend (DiskShare) -> T): T = withContext(Dispatchers.IO) {
-        val share = share(config)
-        try {
-            body(share)
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException || !isStaleSession(e)) throw e
-            shares[config]?.takeIf { it.share === share }?.let { shares.remove(config, it) }
-            coroutineContext.ensureActive()
-            body(share(config))
-        }
-    }
-
-    /** Closes cached sessions for a source after it is edited or deleted. */
-    /** Drops cached sessions for a source; closing them talks to the NAS, so it runs on IO. */
-    suspend fun reset(sourceId: String) = withContext(Dispatchers.IO) {
-        shares.keys.filter { it.id == sourceId }.forEach { key -> shares.remove(key)?.close() }
-    }
+    /** Invalidates pending results/retries immediately; active file readers keep a cleanup lease. */
+    suspend fun reset(sourceId: String) = withContext(Dispatchers.IO) { sessions.reset(sourceId) }
 
     suspend fun testConnection(config: SourceConfig) {
         reset(config.id)
@@ -167,8 +200,10 @@ class SmbService(
     }
 
     /** Opens a file for streaming. Blocking; call from a background thread. */
-    fun open(config: SourceConfig, path: String): RemoteHandle = withShareBlocking(config) { share ->
-        val file = share.openFile(
+    fun open(config: SourceConfig, path: String): RemoteHandle = withSessionBlocking(
+        config, closeInvalidResult = { handle: RemoteHandle -> runCatching { handle.close() } },
+    ) { lease ->
+        val file = lease.value.share.openFile(
             path,
             EnumSet.of(AccessMask.GENERIC_READ),
             null,
@@ -184,7 +219,7 @@ class SmbService(
             file.close()
             throw SmbException("The NAS file is empty or its size could not be read.")
         }
-        RemoteHandle(file, length)
+        SmbRemoteHandle(file, length, lease.retain())
     }
 
     companion object {
@@ -196,8 +231,12 @@ class SmbService(
             0xC0000128L, // STATUS_FILE_CLOSED
         )
 
-        fun isStaleSession(e: Exception): Boolean =
-            if (e is SMBApiException) e.statusCode in staleStatuses else true
+        fun isStaleSession(e: Exception): Boolean {
+            val chain = generateSequence<Throwable>(e) { it.cause }.take(8).toList()
+            if (chain.any { it is kotlinx.coroutines.CancellationException || it is SmbException || it is SourceResetException }) return false
+            chain.firstNotNullOfOrNull { it as? SMBApiException }?.let { return it.statusCode in staleStatuses }
+            return chain.any { it is IOException }
+        }
 
         fun normalizedHost(raw: String): String =
             raw.trim().removePrefix("smb://").removePrefix("\\\\").trim('/', '\\').substringBefore('/')

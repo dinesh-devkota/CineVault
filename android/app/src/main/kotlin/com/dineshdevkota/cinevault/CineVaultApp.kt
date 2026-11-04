@@ -10,6 +10,7 @@ import com.dineshdevkota.cinevault.library.LibraryEditor
 import com.dineshdevkota.cinevault.library.LibraryScanner
 import com.dineshdevkota.cinevault.metadata.MetadataService
 import com.dineshdevkota.cinevault.metadata.TmdbClient
+import com.dineshdevkota.cinevault.playback.PlaybackProgressWriter
 import com.dineshdevkota.cinevault.smb.SmbService
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -38,13 +39,14 @@ class AppContainer(context: Context) {
     val settings = Settings(context, secrets)
     val database = CineVaultDatabase.create(context)
     val smb = SmbService()
+    val playbackProgress = PlaybackProgressWriter(scope)
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
     val metadata = MetadataService(database, TmdbClient(http) { settings.tmdbApiKey })
     val scanner = LibraryScanner(database, secrets, smb::scanVideos, afterScan = { metadata.fetchMissing()?.failureMessage })
-    val editor = LibraryEditor(database, metadata)
+    val editor = LibraryEditor(database, metadata, playbackProgress)
 }
 
 val Context.container: AppContainer get() = (applicationContext as CineVaultApp).container

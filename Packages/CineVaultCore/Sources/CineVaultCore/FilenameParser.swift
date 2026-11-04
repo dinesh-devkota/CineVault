@@ -33,10 +33,13 @@ public enum FilenameParser {
         let stem = (fileName as NSString).deletingPathExtension
         var parsed = parse(name: stem)
         // "Movie (2010)/movie.mkv" or "Movie (2010)/CD1.avi": fall back to the folder name.
-        if parsed.year == nil, components.count >= 2 {
+        if components.count >= 2 {
             let folder = parse(name: components[components.count - 2])
-            if folder.year != nil || parsed.title.isEmpty || isGeneric(parsed.title) {
+            if parsed.year == nil && (folder.year != nil || parsed.title.isEmpty || isGeneric(parsed.title)) {
                 parsed = ParsedMovieName(title: folder.title, year: folder.year, tmdbID: parsed.tmdbID ?? folder.tmdbID)
+            } else if parsed.tmdbID == nil {
+                // An explicit movie-folder tag still applies when the file has its own year.
+                parsed.tmdbID = folder.tmdbID
             }
         }
         return parsed
@@ -63,7 +66,7 @@ public enum FilenameParser {
         var cutIndex = tokens.count
         let currentYear = Calendar(identifier: .gregorian).component(.year, from: Date()) + 1
         for (index, token) in tokens.enumerated().reversed() where index > 0 {
-            if token.count == 4, let value = Int(token), (1900...currentYear).contains(value) {
+            if token.count == 4, let value = Int(token), (1870...currentYear).contains(value) {
                 year = value
                 cutIndex = index
                 break
@@ -75,8 +78,9 @@ public enum FilenameParser {
             }
         }
         tokens = Array(tokens[..<cutIndex])
-        // Trailing release-group / dash leftovers.
-        while let last = tokens.last, last == "-" || isJunk(last) { tokens.removeLast() }
+        // A release year already delimits the title: "Cam (2018)" and "The Web (1947)"
+        // contain title words that also happen to be release tags.
+        while let last = tokens.last, last == "-" || (year == nil && isJunk(last)) { tokens.removeLast() }
         let title = tokens.joined(separator: " ")
             .trimmingCharacters(in: CharacterSet(charactersIn: " -"))
         return ParsedMovieName(title: title, year: year, tmdbID: tmdbID)

@@ -126,6 +126,7 @@ object TitleMatcher {
         candidates: List<TmdbMovieSummary>,
         threshold: Double = 0.5,
     ): TmdbMovieSummary? {
+        if (normalize(title).isEmpty()) return null
         // Earlier results win ties because TMDB orders by popularity.
         var best: TmdbMovieSummary? = null
         var bestScore = -1.0

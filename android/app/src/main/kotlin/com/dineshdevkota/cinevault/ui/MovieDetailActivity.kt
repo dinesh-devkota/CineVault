@@ -23,6 +23,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,6 +47,7 @@ import com.dineshdevkota.cinevault.core.Tmdb
 import com.dineshdevkota.cinevault.data.MovieEntity
 import com.dineshdevkota.cinevault.playback.PlayerActivity
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.util.Locale
 
 class MovieDetailActivity : ComponentActivity() {
@@ -68,6 +71,10 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
     val context = LocalContext.current
     val database = context.container.database
     val scope = rememberCoroutineScope()
+    var updatingWatched by remember(movieId) { mutableStateOf(false) }
+    var watchedError by remember(movieId) { mutableStateOf<String?>(null) }
+    var updatingWatchlist by remember(movieId) { mutableStateOf(false) }
+    var watchlistError by remember(movieId) { mutableStateOf<String?>(null) }
     val movie by produceState<MovieEntity?>(null, movieId) {
         database.movies().observe(movieId).collect { if (it == null) onClose() else value = it }
     }
@@ -151,9 +158,52 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                             Text("Play")
                         }
                     }
-                    OutlinedButton(onClick = { scope.launch { database.movies().setWatched(current.id, !current.isWatched) } }) {
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    OutlinedButton(
+                        enabled = !updatingWatchlist,
+                        onClick = {
+                            val watchlisted = !current.isWatchlisted
+                            updatingWatchlist = true
+                            watchlistError = null
+                            scope.launch {
+                                try {
+                                    database.movies().setWatchlisted(current.id, watchlisted)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    watchlistError = "Could not update your watchlist. Please try again."
+                                } finally {
+                                    updatingWatchlist = false
+                                }
+                            }
+                        },
+                    ) {
+                        Text(if (current.isWatchlisted) "Remove from Watchlist" else "Add to Watchlist")
+                    }
+                    OutlinedButton(
+                        enabled = !updatingWatched,
+                        onClick = {
+                            val watched = !current.isWatched
+                            updatingWatched = true
+                            watchedError = null
+                            scope.launch {
+                                try {
+                                    context.container.editor.setWatched(current.id, watched)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    watchedError = "Could not update watched status. Please try again."
+                                } finally {
+                                    updatingWatched = false
+                                }
+                            }
+                        },
+                    ) {
                         Text(if (current.isWatched) "Mark Unwatched" else "Mark Watched")
                     }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     OutlinedButton(onClick = { scope.launch { database.movies().setHidden(current.id, !current.isHidden) } }) {
                         Text(if (current.isHidden) "Unhide" else "Hide")
                     }
@@ -161,6 +211,8 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                         Text("Edit")
                     }
                 }
+                watchedError?.let { Text(it, color = ErrorText) }
+                watchlistError?.let { Text(it, color = ErrorText) }
                 Text(
                     "IN YOUR LIBRARY",
                     style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 2.sp),
@@ -172,6 +224,7 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                         sourceName,
                         Formatter.formatShortFileSize(context, current.fileSize),
                         "Watched".takeIf { current.isWatched },
+                        "Watchlist".takeIf { current.isWatchlisted },
                         "Hidden".takeIf { current.isHidden },
                     ).joinToString("   ·   "),
                     style = MaterialTheme.typography.bodyMedium,

@@ -53,6 +53,13 @@ class TmdbTest {
         assertNull(TitleMatcher.bestMatch("Heat", 1995, candidates))
     }
 
+    @Test fun matcherRejectsTitlesWithoutSearchableCharacters() {
+        val candidates = listOf(TmdbMovieSummary(id = 603, title = "The Matrix", releaseDate = "1999-03-30"))
+        for (title in listOf("", "   ", "!!!")) {
+            assertNull(TitleMatcher.bestMatch(title, 1999, candidates))
+        }
+    }
+
     @Test fun normalize() {
         assertEquals("amelie le fabuleux and co", TitleMatcher.normalize("Amélie: Le Fabuleux & Co."))
         assertEquals(1.0, TitleMatcher.similarity("Spider-Man", "Spider Man"), 0.0)

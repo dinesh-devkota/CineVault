@@ -11,9 +11,11 @@ interface LibraryEntry {
     val addedAt: Long
     val lastPlayedAt: Long?
     val isWatched: Boolean
+    val isWatchlisted: Boolean get() = false
     val isHidden: Boolean
     val isMissing: Boolean
     val playbackPositionMs: Long
+    val sourceId: String? get() = null
 }
 
 object WatchRules {
@@ -56,7 +58,8 @@ enum class LibraryFilter(val label: String) {
     UNWATCHED("Unwatched"),
     IN_PROGRESS("In Progress"),
     WATCHED("Watched"),
-    HIDDEN("Hidden");
+    HIDDEN("Hidden"),
+    WATCHLIST("Watchlist");
 
     fun matches(entry: LibraryEntry): Boolean = when (this) {
         ALL -> !entry.isHidden
@@ -64,12 +67,24 @@ enum class LibraryFilter(val label: String) {
         IN_PROGRESS -> !entry.isHidden && WatchRules.isInProgress(entry.isWatched, entry.playbackPositionMs)
         WATCHED -> !entry.isHidden && entry.isWatched
         HIDDEN -> entry.isHidden
+        WATCHLIST -> !entry.isHidden && entry.isWatchlisted
     }
 }
 
 object LibraryQuery {
-    fun <T : LibraryEntry> visible(items: List<T>, sort: LibrarySort, filter: LibraryFilter, genre: String?): List<T> =
-        sort.sort(items.filter { !it.isMissing && filter.matches(it) && (genre == null || genre in it.genres) })
+    fun <T : LibraryEntry> visible(
+        items: List<T>,
+        sort: LibrarySort,
+        filter: LibraryFilter,
+        genre: String?,
+        sourceId: String? = null,
+        decade: Int? = null,
+    ): List<T> = sort.sort(items.filter {
+        !it.isMissing && filter.matches(it) &&
+            (genre == null || genre in it.genres) &&
+            (sourceId == null || sourceId == it.sourceId) &&
+            (decade == null || it.year?.let { year -> year / 10 * 10 } == decade)
+    })
 
     /** Hidden and missing movies never appear in search. */
     fun searchMatches(entry: LibraryEntry, text: String): Boolean {
@@ -81,6 +96,17 @@ object LibraryQuery {
     }
 
     fun genres(items: List<LibraryEntry>): List<String> = items.flatMap { it.genres }.toSortedSet().toList()
+
+    /** Newest decades first; unknown years and unavailable movies do not add filter choices. */
+    fun decades(items: List<LibraryEntry>): List<Int> = items
+        .filter { !it.isMissing && !it.isHidden }
+        .mapNotNull { it.year?.let { year -> year / 10 * 10 } }
+        .distinct()
+        .sortedDescending()
+
+    /** Watchlist membership is independent of watched state and playback progress. */
+    fun <T : LibraryEntry> watchlist(items: List<T>): List<T> =
+        visible(items, LibrarySort.TITLE, LibraryFilter.WATCHLIST, genre = null)
 
     fun <T : LibraryEntry> continueWatching(items: List<T>): List<T> = items
         .filter { !it.isMissing && !it.isHidden && WatchRules.isInProgress(it.isWatched, it.playbackPositionMs) }

@@ -34,9 +34,75 @@ struct MetadataFetchSummary {
 final class MetadataService {
     static let shared = MetadataService()
     static let apiKeyAccount = "tmdb-api-key"
+    private let requestData: (URLRequest) async throws -> (Data, URLResponse)
+    private let readAPIKey: () throws -> String
+    private struct RequestIntent {
+        let token: UUID
+        let manual: Bool
+    }
+    private var requests: [UUID: RequestIntent] = [:]
+
+    init(requestData: @escaping (URLRequest) async throws -> (Data, URLResponse) = {
+        try await URLSession.shared.data(for: $0)
+    }, readAPIKey: @escaping () throws -> String = {
+        try Keychain.get(MetadataService.apiKeyAccount) ?? ""
+    }) {
+        self.requestData = requestData
+        self.readAPIKey = readAPIKey
+    }
+
+    /// A response may outlive a rename, reset, or manual re-match.
+    private struct MatchState: Equatable {
+        let id: Int?
+        let title: String
+        let year: Int?
+        let locked: Bool
+
+        init(_ movie: Movie) {
+            id = movie.tmdbID
+            title = movie.title
+            year = movie.year
+            locked = movie.isLocked
+        }
+    }
+
+    /// Capture identity while the model is live; deleted SwiftData models can
+    /// become detached while a network request or another movie is pending.
+    private struct MovieReference {
+        let id: UUID
+        let context: ModelContext?
+
+        init(_ movie: Movie) {
+            id = movie.id
+            context = movie.modelContext
+        }
+
+        func isAvailable(_ movie: Movie) -> Bool {
+            if let context, movie.modelContext !== context { return false }
+            return !movie.isDeleted
+        }
+    }
+
+    private func beginRequest(for reference: MovieReference, manual: Bool) -> UUID? {
+        // A scan must not replace a selection the user is waiting to apply.
+        if requests[reference.id]?.manual == true, !manual { return nil }
+        let token = UUID()
+        requests[reference.id] = RequestIntent(token: token, manual: manual)
+        return token
+    }
+
+    private func finishRequest(for reference: MovieReference, token: UUID) {
+        if requests[reference.id]?.token == token { requests.removeValue(forKey: reference.id) }
+    }
+
+    func resetToFileName(_ movie: Movie) {
+        // Reset is an explicit intent even when title/ID already match the filename.
+        requests.removeValue(forKey: movie.id)
+        movie.resetToFileName()
+    }
 
     var apiKey: String {
-        get throws { try Keychain.get(Self.apiKeyAccount) ?? "" }
+        get throws { try readAPIKey() }
     }
 
     func setAPIKey(_ value: String) throws {
@@ -48,7 +114,8 @@ final class MetadataService {
     }
 
     private func load<T: Decodable>(_ request: URLRequest, as type: T.Type) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await requestData(request)
+        try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse else { throw MetadataError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw MetadataError.httpStatus(http.statusCode) }
         return try TMDB.decoder.decode(T.self, from: data)
@@ -64,8 +131,22 @@ final class MetadataService {
     }
 
     /// Applies TMDB details to a movie. `force` is used by manual re-match.
-    func apply(tmdbID: Int, to movie: Movie, force: Bool = false) async throws {
+    @discardableResult
+    func apply(tmdbID: Int, to movie: Movie, force: Bool = false) async throws -> Bool {
+        guard !movie.isDeleted else { return false }
+        let reference = MovieReference(movie)
+        guard let token = beginRequest(for: reference, manual: force) else { return false }
+        defer { finishRequest(for: reference, token: token) }
+        return try await apply(tmdbID: tmdbID, to: movie, force: force, token: token, reference: reference)
+    }
+
+    private func apply(tmdbID: Int, to movie: Movie, force: Bool, token: UUID,
+                       reference: MovieReference) async throws -> Bool {
+        guard reference.isAvailable(movie) else { return false }
+        let original = MatchState(movie)
         let details = try await load(TMDB.detailsRequest(id: tmdbID, apiKey: try apiKey), as: TMDBMovieDetails.self)
+        guard reference.isAvailable(movie), requests[reference.id]?.token == token,
+              MatchState(movie) == original else { return false }
         movie.tmdbID = details.id
         if force || !movie.isLocked {
             movie.setTitle(details.title)
@@ -79,20 +160,29 @@ final class MetadataService {
         movie.backdropPath = details.backdropPath
         movie.genres = details.genres?.map(\.name) ?? []
         movie.metadataFetched = true
+        if force { movie.isLocked = true }
+        return true
     }
 
     /// Auto-match: uses a {tmdb-123} tag if present, otherwise title/year search.
     func match(_ movie: Movie) async throws {
+        guard !movie.isDeleted else { return }
+        let reference = MovieReference(movie)
+        guard let token = beginRequest(for: reference, manual: false) else { return }
+        defer { finishRequest(for: reference, token: token) }
+        let original = MatchState(movie)
         if let id = movie.tmdbID {
-            try await apply(tmdbID: id, to: movie)
+            _ = try await apply(tmdbID: id, to: movie, force: false, token: token, reference: reference)
             return
         }
         let title = movie.isLocked ? movie.title : movie.parsedTitle
         let year = movie.isLocked ? movie.year : movie.parsedYear
         guard !title.isEmpty else { return }
         let results = try await search(title: title, year: year)
+        guard reference.isAvailable(movie), requests[reference.id]?.token == token,
+              MatchState(movie) == original else { return }
         if let best = TitleMatcher.bestMatch(title: title, year: year, in: results) {
-            try await apply(tmdbID: best.id, to: movie)
+            _ = try await apply(tmdbID: best.id, to: movie, force: false, token: token, reference: reference)
         } else {
             movie.metadataFetched = true
         }
@@ -107,10 +197,14 @@ final class MetadataService {
 
     func update(_ movies: [Movie], in context: ModelContext,
                 match: (Movie) async throws -> Void) async throws -> MetadataFetchSummary {
+        let pending = movies.filter { !$0.isDeleted }.map { ($0, MovieReference($0)) }
+        var attempted = 0
         var failed = 0
         var firstError: String?
-        for movie in movies {
+        for (movie, reference) in pending {
             try Task.checkCancellation()
+            guard reference.isAvailable(movie) else { continue }
+            attempted += 1
             do {
                 try await match(movie)
             } catch is CancellationError {
@@ -123,6 +217,6 @@ final class MetadataService {
             }
             try context.save()
         }
-        return MetadataFetchSummary(attempted: movies.count, failed: failed, firstError: firstError)
+        return MetadataFetchSummary(attempted: attempted, failed: failed, firstError: firstError)
     }
 }

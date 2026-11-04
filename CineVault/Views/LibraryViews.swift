@@ -18,7 +18,7 @@ enum LibrarySort: String, CaseIterable, Identifiable {
 }
 
 enum LibraryFilter: String, CaseIterable, Identifiable {
-    case all = "All", unwatched = "Unwatched", inProgress = "In Progress", watched = "Watched", hidden = "Hidden"
+    case all = "All", unwatched = "Unwatched", inProgress = "In Progress", watched = "Watched", hidden = "Hidden", watchlist = "Watchlist"
     var id: String { rawValue }
 
     func matches(_ movie: Movie) -> Bool {
@@ -28,6 +28,55 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
         case .inProgress: return !movie.isHidden && movie.isInProgress
         case .watched: return !movie.isHidden && movie.isWatched
         case .hidden: return movie.isHidden
+        case .watchlist: return !movie.isHidden && movie.isWatchlisted
+        }
+    }
+}
+
+enum LibraryQuery {
+    static func visible(_ movies: [Movie], sort: LibrarySort, filter: LibraryFilter,
+                        genre: String? = nil, sourceID: UUID? = nil, decade: Int? = nil) -> [Movie] {
+        sort.sorted(movies.filter { movie in
+            !movie.isMissing && filter.matches(movie)
+                && (genre.map { movie.genres.contains($0) } ?? true)
+                && (sourceID.map { movie.source?.id == $0 } ?? true)
+                && (decade.map { selected in movie.year.map { $0 / 10 * 10 == selected } ?? false } ?? true)
+        })
+    }
+
+    static func watchlist(_ movies: [Movie]) -> [Movie] {
+        visible(movies, sort: .title, filter: .watchlist)
+    }
+
+    static func selectedSourceID(_ selection: String, sources: [MediaSource]) -> UUID? {
+        guard let id = UUID(uuidString: selection), sources.contains(where: { $0.id == id }) else { return nil }
+        return id
+    }
+}
+
+@MainActor
+final class LibraryPreferences: ObservableObject {
+    private let defaults: UserDefaults
+    @Published var sort: LibrarySort { didSet { defaults.set(sort.rawValue, forKey: "librarySort") } }
+    @Published var filter: LibraryFilter { didSet { defaults.set(filter.rawValue, forKey: "libraryFilter") } }
+    @Published var genre: String { didSet { defaults.set(genre, forKey: "libraryGenre") } }
+    @Published var sourceSelection: String { didSet { defaults.set(sourceSelection, forKey: "librarySourceID") } }
+    @Published var decade: Int { didSet { defaults.set(decade, forKey: "libraryDecade") } }
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        sort = defaults.string(forKey: "librarySort").flatMap(LibrarySort.init(rawValue:)) ?? .title
+        filter = defaults.string(forKey: "libraryFilter").flatMap(LibraryFilter.init(rawValue:)) ?? .all
+        genre = defaults.string(forKey: "libraryGenre") ?? ""
+        sourceSelection = defaults.string(forKey: "librarySourceID") ?? ""
+        let savedDecade = defaults.integer(forKey: "libraryDecade")
+        decade = savedDecade > 0 && savedDecade % 10 == 0 ? savedDecade : 0
+    }
+
+    func sourcesChanged(from previousIDs: [UUID], to sources: [MediaSource]) {
+        if let selected = UUID(uuidString: sourceSelection), previousIDs.contains(selected),
+           LibraryQuery.selectedSourceID(sourceSelection, sources: sources) == nil {
+            sourceSelection = ""
         }
     }
 }
@@ -43,18 +92,34 @@ enum LibrarySearch {
 
 struct LibraryView: View {
     @Query private var movies: [Movie]
-    @AppStorage("librarySort") private var sort: LibrarySort = .title
-    @AppStorage("libraryFilter") private var filter: LibraryFilter = .all
-    @State private var genre: String?
+    @Query(sort: \MediaSource.name) private var sources: [MediaSource]
+    @StateObject private var preferences = LibraryPreferences()
 
     private var genres: [String] {
-        Array(Set(movies.flatMap(\.genres))).sorted()
+        var values = Set(movies.flatMap(\.genres).filter { !$0.isEmpty })
+        if !preferences.genre.isEmpty { values.insert(preferences.genre) }
+        return values.sorted()
+    }
+
+    private var decades: [Int] {
+        var values = Set(movies.filter { !$0.isHidden && !$0.isMissing }.compactMap(\.year)
+            .filter { $0 > 0 }.map { $0 / 10 * 10 })
+        if preferences.decade > 0 { values.insert(preferences.decade) }
+        return values.sorted(by: >)
+    }
+
+    private var selectedSourceID: UUID? {
+        LibraryQuery.selectedSourceID(preferences.sourceSelection, sources: sources)
+    }
+
+    private var sourceBinding: Binding<String> {
+        Binding(get: { selectedSourceID?.uuidString ?? "" }, set: { preferences.sourceSelection = $0 })
     }
 
     private var visible: [Movie] {
-        sort.sorted(movies.filter { movie in
-            !movie.isMissing && filter.matches(movie) && (genre.map { movie.genres.contains($0) } ?? true)
-        })
+        LibraryQuery.visible(movies, sort: preferences.sort, filter: preferences.filter,
+                             genre: preferences.genre.isEmpty ? nil : preferences.genre, sourceID: selectedSourceID,
+                             decade: preferences.decade == 0 ? nil : preferences.decade)
     }
 
     var body: some View {
@@ -75,15 +140,29 @@ struct LibraryView: View {
                 }
 
                 HStack(spacing: 24) {
-                    Picker("Sort", selection: $sort) {
+                    Picker("Sort", selection: $preferences.sort) {
                         ForEach(LibrarySort.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    Picker("Show", selection: $filter) {
+                    Picker("Show", selection: $preferences.filter) {
                         ForEach(LibraryFilter.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    Picker("Genre", selection: $genre) {
-                        Text("All Genres").tag(String?.none)
-                        ForEach(genres, id: \.self) { Text($0).tag(String?.some($0)) }
+                    Picker("Genre", selection: $preferences.genre) {
+                        Text("All Genres").tag("")
+                        ForEach(genres, id: \.self) { Text($0).tag($0) }
+                    }
+                    Spacer()
+                }
+                .pickerStyle(.menu)
+
+                HStack(spacing: 24) {
+                    Picker("Source", selection: sourceBinding) {
+                        Text("All Sources").tag("")
+                        ForEach(sources) { Text($0.name).tag($0.id.uuidString) }
+                    }
+                    .frame(maxWidth: 560, alignment: .leading)
+                    Picker("Decade", selection: $preferences.decade) {
+                        Text("All Decades").tag(0)
+                        ForEach(decades, id: \.self) { Text("\($0)s").tag($0) }
                     }
                     Spacer()
                 }
@@ -95,7 +174,7 @@ struct LibraryView: View {
                         .padding(.top, 100)
                 } else if visible.isEmpty {
                     ContentUnavailableView("No matching movies", systemImage: "line.3.horizontal.decrease.circle",
-                                           description: Text("Try another filter or genre."))
+                                           description: Text("Try another filter, source, decade or genre."))
                         .padding(.top, 100)
                 } else {
                     PosterGrid(movies: visible)
@@ -105,6 +184,9 @@ struct LibraryView: View {
             .padding(.bottom, 100)
         }
         .background(CinemaBackground())
+        .onChange(of: sources.map(\.id)) { previousIDs, _ in
+            preferences.sourcesChanged(from: previousIDs, to: sources)
+        }
     }
 }
 
@@ -149,6 +231,7 @@ struct HomeView: View {
                         .padding(.top, 100)
                 } else {
                     ContinueWatchingRow(movies: Array(continuing.prefix(20)))
+                    PosterRow(title: "Watchlist", movies: Array(LibraryQuery.watchlist(movies).prefix(20)))
                     if let featured {
                         FeaturedMovieCard(movie: featured)
                     }

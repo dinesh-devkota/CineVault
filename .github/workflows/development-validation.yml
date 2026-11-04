@@ -1,4 +1,5 @@
-# Runs the existing public validation jobs from a development-branch push.
+# Runs public validation from a development-branch push.
+# Android runtime tests run in android.yml on pushes and pull requests.
 # Keep these jobs aligned with ci.yml, nas-integration.yml, ui-preview.yml,
 # and android.yml. No signing credentials or store uploads are involved.
 name: Development validation
@@ -6,7 +7,14 @@ name: Development validation
 on:
   push:
     branches: [dinesh-devkota-sonepar-build-cinevault-tvos-app]
-    paths: [.github/workflows/development-validation.yml]
+    paths:
+      - .github/workflows/development-validation.yml
+      - CineVault/**
+      - CineVaultTests/**
+      - Packages/**
+      - android/**
+      - scripts/**
+      - project*.yml
   workflow_dispatch:
 
 permissions:
@@ -119,6 +127,21 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/cinevault-tests" \
             -resultBundlePath "$RUNNER_TEMP/nas-results.xcresult" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test-without-building | tail -n 200
+      - name: Report simulator test failures
+        if: failure()
+        run: |
+          if [[ -d "$RUNNER_TEMP/nas-results.xcresult" ]] && \
+             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/nas-results.xcresult" > "$RUNNER_TEMP/nas-summary.json"; then
+            python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          summary = json.loads((Path(os.environ["RUNNER_TEMP"]) / "nas-summary.json").read_text())
+          for failure in summary.get("testFailures", []):
+              message = (failure.get("testName", "") + ": " + failure.get("failureText", ""))[:4000]
+              message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=tvOS simulator test::{message}")
+          PY
+          fi
       - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -238,7 +261,7 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
       - name: Test, lint and build community app
-        run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease
+        run: ./gradlew --no-daemon --max-workers=4 :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:lintRelease :app:assembleRelease :app:bundleRelease
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
