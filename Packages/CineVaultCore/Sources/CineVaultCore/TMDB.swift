@@ -116,6 +116,7 @@ public enum TitleMatcher {
 
     public static func bestMatch(title: String, year: Int?, in candidates: [TMDBMovieSummary],
                                  threshold: Double = 0.5) -> TMDBMovieSummary? {
+        guard !normalize(title).isEmpty else { return nil }
         // Earlier results win ties because TMDB orders by popularity.
         var best: (TMDBMovieSummary, Double)?
         for candidate in candidates {

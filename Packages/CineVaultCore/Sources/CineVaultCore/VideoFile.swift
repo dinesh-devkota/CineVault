@@ -25,7 +25,8 @@ public enum VideoFile {
         if stem.hasPrefix("._") { return false }
         let markers = ["sample", "trailer", "featurette", "behindthescenes", "deleted", "extra"]
         return !markers.contains(where: { marker in
-            stem == marker || stem.hasSuffix("-" + marker) || stem.hasSuffix("." + marker) || stem.hasSuffix("_" + marker)
+            stem == marker || stem.hasSuffix("-" + marker) || stem.hasSuffix("." + marker)
+                || stem.hasSuffix("_" + marker) || stem.hasSuffix(" " + marker)
         })
     }
 

@@ -24,7 +24,8 @@ object VideoFile {
         if (stem.startsWith("._")) return false
         val markers = listOf("sample", "trailer", "featurette", "behindthescenes", "deleted", "extra")
         return markers.none { marker ->
-            stem == marker || stem.endsWith("-$marker") || stem.endsWith(".$marker") || stem.endsWith("_$marker")
+            stem == marker || stem.endsWith("-$marker") || stem.endsWith(".$marker") ||
+                stem.endsWith("_$marker") || stem.endsWith(" $marker")
         }
     }
 

@@ -31,10 +31,13 @@ object FilenameParser {
         val fileName = components.lastOrNull() ?: path
         var parsed = parseName(Paths.stem(fileName))
         // "Movie (2010)/movie.mkv" or "Movie (2010)/CD1.avi": fall back to the folder name.
-        if (parsed.year == null && components.size >= 2) {
+        if (components.size >= 2) {
             val folder = parseName(components[components.size - 2])
-            if (folder.year != null || parsed.title.isEmpty() || isGeneric(parsed.title)) {
+            if (parsed.year == null && (folder.year != null || parsed.title.isEmpty() || isGeneric(parsed.title))) {
                 parsed = ParsedMovieName(folder.title, folder.year, parsed.tmdbId ?: folder.tmdbId)
+            } else if (parsed.tmdbId == null) {
+                // An explicit movie-folder tag still applies when the file has its own year.
+                parsed = parsed.copy(tmdbId = folder.tmdbId)
             }
         }
         return parsed
@@ -59,7 +62,7 @@ object FilenameParser {
         for (index in tokens.indices.reversed()) {
             if (index == 0) break
             val token = tokens[index]
-            if (token.length == 4 && token.all { it in '0'..'9' } && token.toInt() in 1900..maxYear) {
+            if (token.length == 4 && token.all { it in '0'..'9' } && token.toInt() in 1870..maxYear) {
                 year = token.toInt()
                 cutIndex = index
                 break
@@ -69,8 +72,11 @@ object FilenameParser {
             (1 until tokens.size).firstOrNull { isJunk(tokens[it]) }?.let { cutIndex = it }
         }
         while (tokens.size > cutIndex) tokens.removeAt(tokens.lastIndex)
-        // Trailing release-group / dash leftovers.
-        while (tokens.isNotEmpty() && (tokens.last() == "-" || isJunk(tokens.last()))) tokens.removeAt(tokens.lastIndex)
+        // A release year already delimits the title: "Cam (2018)" and "The Web (1947)"
+        // contain title words that also happen to be release tags.
+        while (tokens.isNotEmpty() && (tokens.last() == "-" || (year == null && isJunk(tokens.last())))) {
+            tokens.removeAt(tokens.lastIndex)
+        }
         return ParsedMovieName(tokens.joinToString(" ").trim(' ', '-'), year, tmdbId)
     }
 

@@ -36,6 +36,13 @@ final class TMDBTests: XCTestCase {
         XCTAssertNil(TitleMatcher.bestMatch(title: "Heat", year: 1995, in: candidates))
     }
 
+    func testMatcherRejectsTitlesWithoutSearchableCharacters() {
+        let candidates = [TMDBMovieSummary(id: 603, title: "The Matrix", releaseDate: "1999-03-30")]
+        for title in ["", "   ", "!!!"] {
+            XCTAssertNil(TitleMatcher.bestMatch(title: title, year: 1999, in: candidates))
+        }
+    }
+
     func testNormalize() {
         XCTAssertEqual(TitleMatcher.normalize("Amélie: Le Fabuleux & Co."), "amelie le fabuleux and co")
         XCTAssertEqual(TitleMatcher.similarity("Spider-Man", "Spider Man"), 1)
