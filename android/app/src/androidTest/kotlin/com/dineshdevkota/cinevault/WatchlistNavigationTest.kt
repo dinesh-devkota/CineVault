@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import com.dineshdevkota.cinevault.core.LibraryFilter
 import com.dineshdevkota.cinevault.core.LibrarySort
@@ -201,12 +202,30 @@ class WatchlistNavigationTest {
 
     private fun visible(text: String) {
         val found = device.wait(Until.hasObject(By.text(text)), 10_000)
-        val focus = if (found) "" else runCatching {
-            device.findObjects(By.focused(true)).joinToString { node ->
-                "text=${node.text}, description=${node.contentDescription}, children=${node.children.map { it.text }}"
-            }
-        }.getOrDefault("unavailable")
+        val focus = if (found) "" else focusDiagnostics()
         assertTrue("Expected TV screen text: $text; focused=$focus", found)
         device.waitForIdle()
     }
+
+    /** Compose may expose a focused host with several unlabeled intermediate accessibility nodes. */
+    private fun focusDiagnostics(): String = runCatching {
+        val pending = ArrayDeque<Pair<UiObject2, Int>>()
+        device.findObjects(By.focused(true)).forEach { pending.addLast(it to 0) }
+        val details = mutableListOf<String>()
+        var visited = 0
+        while (pending.isNotEmpty() && visited++ < 100) {
+            val (node, depth) = pending.removeFirst()
+            val text = node.text
+            val description = node.contentDescription
+            if (depth == 0 || !text.isNullOrBlank() || !description.isNullOrBlank()) {
+                details += "depth=$depth ${node.className.substringAfterLast('.')} " +
+                    "focused=${node.isFocused} selected=${node.isSelected} bounds=${node.visibleBounds.toShortString()} " +
+                    "text=$text description=$description"
+            }
+            if (depth < 12) node.children.forEach { pending.addLast(it to depth + 1) }
+        }
+        "package=${device.currentPackageName}, savedFilter=${container.settings.libraryFilter}, " +
+            "savedSource=${container.settings.librarySourceId}, savedDecade=${container.settings.libraryDecade}; " +
+            details.joinToString(" | ").take(3_200)
+    }.getOrElse { "unavailable: ${it.javaClass.simpleName}: ${it.message}" }
 }

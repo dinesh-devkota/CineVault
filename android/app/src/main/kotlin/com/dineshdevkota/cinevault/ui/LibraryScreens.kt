@@ -249,42 +249,54 @@ private fun MoviesTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) 
         LibraryQuery.visible(movies, sort, filter, genre, selectedSourceId, decade)
     }
 
-    MovieGrid {
-        fullWidth { ScreenHeader("Movies", kicker = "YOUR COLLECTION", trailing = "${visible.size} titles") }
-        fullWidth {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    CycleButton("Sort", sort, LibrarySort.entries, { it.label }, {
-                        sort = it
-                        settings.librarySort = it
-                    })
-                    CycleButton("Show", filter, LibraryFilter.entries, { it.label }, {
-                        filter = it
-                        settings.libraryFilter = it
-                    })
-                    CycleButton("Genre", genre, genres, { it ?: "All" }, {
-                        genre = it
-                        settings.libraryGenre = it
-                    }, Modifier.width(240.dp))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    CycleButton("Source", selectedSourceId, listOf<String?>(null) + sources.orEmpty().map { it.id }, { id ->
-                        sources?.firstOrNull { it.id == id }?.name ?: "All sources"
-                    }, {
-                        sourceId = it
-                        settings.librarySourceId = it
-                    }, Modifier.width(320.dp))
-                    CycleButton("Decade", decade, decades, { it?.let { year -> "${year}s" } ?: "All decades" }, {
-                        decade = it
-                        settings.libraryDecade = it
-                    })
-                }
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(28.dp)) {
+        ScreenHeader(
+            "Movies", Modifier.padding(horizontal = ScreenPadding),
+            kicker = "YOUR COLLECTION", trailing = "${visible.size} titles",
+        )
+        // Keep focused filters outside the recycled result items. Replacing all
+        // posters with an empty state must not dispose the control being used.
+        Column(
+            Modifier.padding(horizontal = ScreenPadding),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                CycleButton("Sort", sort, LibrarySort.entries, { it.label }, {
+                    sort = it
+                    settings.librarySort = it
+                })
+                CycleButton("Show", filter, LibraryFilter.entries, { it.label }, {
+                    filter = it
+                    settings.libraryFilter = it
+                })
+                CycleButton("Genre", genre, genres, { it ?: "All" }, {
+                    genre = it
+                    settings.libraryGenre = it
+                }, Modifier.width(240.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                CycleButton("Source", selectedSourceId, listOf<String?>(null) + sources.orEmpty().map { it.id }, { id ->
+                    sources?.firstOrNull { it.id == id }?.name ?: "All sources"
+                }, {
+                    sourceId = it
+                    settings.librarySourceId = it
+                }, Modifier.width(320.dp))
+                CycleButton("Decade", decade, decades, { it?.let { year -> "${year}s" } ?: "All decades" }, {
+                    decade = it
+                    settings.libraryDecade = it
+                })
             }
         }
-        when {
-            movies.isEmpty() -> fullWidth { EmptyState("No movies yet", "Add your NAS in the Sources tab.") }
-            visible.isEmpty() -> fullWidth { EmptyState("No matching movies", "Try another filter, source, decade or genre.") }
-            else -> posters(visible, onOpen)
+        Box(Modifier.weight(1f)) {
+            MovieGrid {
+                when {
+                    movies.isEmpty() -> fullWidth { EmptyState("No movies yet", "Add your NAS in the Sources tab.") }
+                    visible.isEmpty() -> fullWidth {
+                        EmptyState("No matching movies", "Try another filter, source, decade or genre.")
+                    }
+                    else -> posters(visible, onOpen)
+                }
+            }
         }
     }
 }
