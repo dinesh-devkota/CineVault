@@ -1,10 +1,11 @@
 # CineVault
 
-A Plex-style movie library for **Apple TV** that reads your movies **directly from a NAS over SMB** — no media server, no transcoding box. Native tvOS SwiftUI app.
+A movie library for **Apple TV and Android TV** that streams movies directly from
+a NAS over SMB. Built with SwiftUI on tvOS and Compose for TV on Android.
 
-## Android TV development
+## Android TV
 
-The development branch also includes an Android TV app with direct SMB playback,
+The Android TV app includes direct SMB playback,
 library management, search, and TMDB metadata. See the [Android guide](docs/ANDROID.md)
 for build and installation instructions, release signing, and a first NAS playback
 test. Android billing and Google Play distribution remain pending. Real Android TV
