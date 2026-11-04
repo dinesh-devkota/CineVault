@@ -39,6 +39,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,13 +70,22 @@ fun RootScreen() {
     val openMovie: (MovieEntity) -> Unit = { MovieDetailActivity.start(context, it.id) }
 
     var tabRowFocused by remember { mutableStateOf(false) }
+    var initialFocusRequested by remember { mutableStateOf(false) }
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
 
     // Like tvOS: Back first returns to the tab bar, then to Home, then leaves the app.
     BackHandler(enabled = !tabRowFocused || tab != 0) {
         if (tabRowFocused) tab = 0
         tabFocus[tab].requestFocus()
     }
-    LaunchedEffect(Unit) { tabFocus[tab].requestFocus() }
+    // The saved tab can compose before a recreated activity regains window focus.
+    // Requesting focus then is lost, and the first D-pad press only establishes
+    // focus instead of navigating. Restore it once the window accepts input.
+    LaunchedEffect(windowFocused) {
+        if (windowFocused && !initialFocusRequested) {
+            initialFocusRequested = tabFocus[tab].requestFocus()
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         TabRow(
