@@ -362,3 +362,19 @@ restoration in a fresh task; publication remains a user action in environment se
 - TVNavigationTest now refreshes API 34+ accessibility caches before polling
   visible labels, matching the existing Watchlist test and preserving D-pad
   actions and all screen assertions. Run the full suite only in isolated CI.
+
+### Validated merge baseline
+
+Source revision `36c3cde36f27d18563f5677f410e580800b69c53` passed every job in
+[Development validation 41940552196](https://github.com/dinesh-devkota/CineVault/actions/runs/41940552196)
+and [Android validation 41940552154](https://github.com/dinesh-devkota/CineVault/actions/runs/41940552154).
+Swift core passed 38 tests plus five build-helper tests. The unsigned tvOS build,
+Apple TV simulator NAS/runtime tests, and Home/detail/NAS preview captures passed.
+Android passed all 32 runtime tests with zero failures or skips, plus unit tests,
+lint, debug/release builds, and unsigned AAB packaging. These results validate the
+earlier scan/share fixes as well as the TV grouping correction.
+
+The owner explicitly authorized merging development into the default branch
+after these checks. `main` is an ancestor of this revision, so a fast-forward
+preserves all existing main history. This final handoff update changes only
+documentation; its application source is identical to the validated revision.
