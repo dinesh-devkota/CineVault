@@ -416,6 +416,25 @@ documentation; its application source is identical to the validated revision.
 - Five Python build-helper tests passed using Git Bash on Windows. The system
   `bash.exe` points to unavailable WSL and fails these helpers with exit 127;
   prefix the test process PATH with Git's `bin` when running them locally.
-- This update is being pushed to the development branch. Hosted macOS/Android
-  results must be checked separately; Windows cannot validate tvOS builds.
-  No signing, TestFlight, store upload, or new physical Apple TV test occurred.
+- Source revision `9be5bfb7fc8274928dd928f6cc51d7f6393e2f4f` was pushed to the
+  development branch. [Android validation 41952554309](https://github.com/dinesh-devkota/CineVault/actions/runs/41952554309)
+  passed both jobs: 40 runtime tests executed, zero failures or skips, plus unit
+  tests, lint, debug/release builds, and unsigned AAB packaging.
+- [Development validation 41952554325](https://github.com/dinesh-devkota/CineVault/actions/runs/41952554325)
+  passed 54 Swift core tests, five helper tests, the unsigned tvOS build, all 70
+  Apple simulator tests (including real SMB playback/seek through asynchronous
+  asset preparation), and the Android build. All three OCR-verified preview
+  screens passed (Home, detail, NAS). The preview job then failed only because
+  GitHub's artifact upload service timed out after five retries; diagnostic
+  upload also timed out. Do not call the whole workflow green or treat this as
+  an app/capture failure. No duplicate workflow was dispatched for the upload.
+- Reopening the installed app started its normal NAS rescan. The source editor
+  visibly contains the new scan-folder control; folder controls stay disabled
+  during scanning. No source values or exclusion selections were changed in the
+  visual check. A later read-only database count confirmed the rescan completed
+  at 2026-11-05 02:11:06 UTC: 9,026 items remain present, with zero present `.d.ts`
+  files and zero present `node_modules` entries. Old records remain missing to
+  preserve history; NAS files were not deleted. No credentials were selected or
+  printed during the count check.
+- The default branch remains at the prior TV-grouping baseline. No signing,
+  TestFlight, store upload, or new physical Apple TV test occurred.
