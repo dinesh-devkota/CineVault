@@ -240,7 +240,7 @@ struct HomeView: View {
                         .padding(.top, 100)
                 } else {
                     ContinueWatchingRow(movies: Array(continuing.prefix(20)))
-                    PosterRow(title: "Watchlist", movies: Array(LibraryQuery.watchlist(movies).prefix(20)))
+                    CollectionPosterRow(title: "Watchlist", movies: LibraryQuery.watchlist(movies))
                     if let featured {
                         FeaturedMovieCard(movie: featured)
                     }
@@ -251,7 +251,7 @@ struct HomeView: View {
                             else { PosterRow(title: kind.label, movies: Array(collection.prefix(20))) }
                         }
                     }
-                    PosterRow(title: "Unwatched", movies: Array(available.filter { !$0.isWatched }.prefix(20)))
+                    CollectionPosterRow(title: "Unwatched", movies: available.filter { !$0.isWatched })
                 }
             }
             .padding(.horizontal, 70)

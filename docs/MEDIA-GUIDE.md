@@ -35,6 +35,13 @@ include a season/episode marker such as `S01E01`. Keep each show's seasons under
 one show folder. Browse a show's master poster, choose a season, then select an
 episode tile to play it.
 
+Names such as `[1x02]`, `S01 E02`, and `S01xE02` also work, including folders
+named `Show Name Season 1`. Under `TV Shows`, the show folder supplies the shared
+title even when episode filenames use a different title for each season. Local
+grouping does not require an artwork key or another scan after an app update.
+Unnumbered extras need a season/episode marker, such as `S00E01`, to appear in
+the show's **Specials** season.
+
 For audio music, consistent artist and album folders help identify the files.
 TMDB is not an audio album catalog: its Music category describes screen content
 such as music films, not MP3 artist, album, or cover-art information.

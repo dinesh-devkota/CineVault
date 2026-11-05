@@ -40,4 +40,65 @@ class EpisodeParserTest {
         assertEquals(MediaKind.DOCUMENTARY, MediaFile.kind("Documentaries/Film.mp4"))
         assertEquals(MediaKind.MUSIC, MediaFile.kind("Music/Show.S01E02.mp3"))
     }
+
+    @Test fun groupsBracketedEpisodesAcrossPrefixedSeasonFolders() {
+        for (season in listOf(1, 5, 9)) {
+            val path = "TV Shows/24/24 Season $season/24 - Day $season - [${season}x23].mkv"
+            assertEquals(path, EpisodeInfo("24", season, 23), EpisodeParser.parse(path))
+        }
+        assertEquals(EpisodeInfo("Example", 3, 4, 2022), EpisodeParser.parse(
+            "TV Shows/Example (2022)/Example Season 3/Unrelated - [3x04].mkv"))
+    }
+
+    @Test fun acceptsBracketParenAndSpacedMarkersWithoutChangingTitle() {
+        for (filename in listOf("Show.Name.[S01E02].mkv", "Show Name (1x02).mp4",
+            "Show Name [S01 E02].mkv", "Show Name (s01 e02).mp4")) {
+            assertEquals(filename, EpisodeInfo("Show Name", 1, 2), EpisodeParser.parse(filename))
+        }
+    }
+
+    @Test fun seriesFolderWinsOverSeasonSpecificFilenameWithoutSeasonFolder() {
+        assertEquals(EpisodeInfo("Example", 3, 4), EpisodeParser.parse(
+            "TV Shows/Example/Day Three/Other.Title.[3x04].mkv"))
+        assertEquals(EpisodeInfo("Example", 2, 3), EpisodeParser.parse(
+            """TV Shows\Example\Example Season 2\03 - Episode title.mp4"""))
+        assertEquals(EpisodeInfo("Example", 2, 3), EpisodeParser.parse(
+            "Example/Example Season 2/[2x03].mp4"))
+    }
+
+    @Test fun bracketedMovieResolutionsAndUnmarkedFilesRemainMovies() {
+        for (path in listOf("Movies/Film.[1920x1080].mkv", "Movies/Film.(640x480).mp4",
+            "Movies/Film (2024) [1080p].mkv", "TV Shows/Example/Example Season 2/Trailer.mp4",
+            "TV Shows/Example/Example Season 2/2024 - Movie.mp4")) {
+            assertNull(path, EpisodeParser.parse(path))
+        }
+    }
+
+    @Test fun groupsAllEightObservedSeasonLayoutsAndLeavesUnnumberedExtrasOut() {
+        for (season in 1..8) for (episode in 1..24) {
+            val number = episode.toString().padStart(2, '0')
+            val relative = when (season) {
+                1 -> "24 Season 1/24 - S01xE$number.mp4"
+                2, 3, 4 -> "24 - [${season}x$number] - Day $season  8 00 A.M. - 9 00 A.M.mkv"
+                5, 6, 7 -> "24 - Day $season - [${season}x$number].mkv"
+                else -> "24 - 8x$number - Day 8  4 00 P.M. - 5 00 P.M..mkv"
+            }
+            val path = "TV Shows/24/24 Season $season/$relative"
+            assertEquals(path, EpisodeInfo("24", season, episode), EpisodeParser.parse(path))
+        }
+        assertEquals(EpisodeInfo("Example", 1, 2, 2022), EpisodeParser.parse(
+            "Example (2022)/Example Season 1/Example Season 1/Other - S01xE02.mp4"))
+        for (name in listOf("Behind the Scenes", "Cast Interviews")) {
+            assertNull(EpisodeParser.parse("TV Shows/24/24 Season 1/24 EXTRAS/$name.mp4"))
+        }
+    }
+
+    @Test fun explicitSeasonParentKeepsShowsUnderCategoryFoldersSeparate() {
+        for (title in listOf("Show A", "Show B")) {
+            assertEquals(EpisodeInfo(title, 1, 1), EpisodeParser.parse(
+                "TV Shows/Completed/$title/Season 1/${title.replace(' ', '.')}.S01E01.mkv"))
+            assertEquals(EpisodeInfo(title, 1, 1), EpisodeParser.parse(
+                "TV Shows/Completed/$title/$title Season 1/$title Season 1/Other.S01xE01.mp4"))
+        }
+    }
 }

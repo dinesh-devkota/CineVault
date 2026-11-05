@@ -37,6 +37,25 @@ import com.dineshdevkota.cinevault.core.Tmdb
 import com.dineshdevkota.cinevault.data.MovieEntity
 
 @Composable
+internal fun CollectionRow(
+    title: String, movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit, onShow: (String) -> Unit,
+) {
+    val collection = remember(movies) { collectionItems(movies, limit = 20) }
+    Column {
+        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = ScreenPadding))
+        LazyRow(contentPadding = PaddingValues(horizontal = ScreenPadding, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            items(collection, key = { it.id }) { item ->
+                when (item) {
+                    is CollectionItem.Movie -> PosterCard(item.movie, onClick = { onOpen(item.movie) }, modifier = Modifier.width(PosterWidth))
+                    is CollectionItem.Show -> TVArtworkCard(item.show.title, "${item.show.seasons.size} seasons", item.show.posterPath,
+                        modifier = Modifier.width(PosterWidth), onClick = { onShow(item.show.id) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun TVShowRow(episodes: List<MovieEntity>, onShow: (String) -> Unit) {
     val shows = remember(episodes) { groupTVShows(episodes).take(20) }
     Column {
@@ -67,7 +86,9 @@ internal fun TVShowBrowser(
         else if (initialShowId != null && onExit != null) onExit()
         else { showId = null; anchorId = null }
     }
-    BackHandler(enabled = showId != null, onBack = goBack)
+    BackHandler(enabled = showId != null || onExit != null) {
+        if (showId == null) onExit?.invoke() else goBack()
+    }
     LaunchedEffect(shows.map { it.id }) {
         if (showId != null && shows.none { it.id == showId }) {
             showId = show?.id

@@ -338,3 +338,27 @@ restoration in a fresh task; publication remains a user action in environment se
   no Apple job executed. Development validation now uses supported macos-15-intel
   runners. Windows cannot compile or run tvOS locally; physical Apple TV testing
   and signing remain outstanding until Apple account/device prerequisites exist.
+
+### TV grouping correction — 2026-11-04
+
+- Fixed Android and Swift recognition of bracketed `1x02`, spaced `S01 E02`,
+  and `S01xE02` markers, plus prefixed/repeated season directories. The nearest
+  series folder takes precedence, so intermediate folders such as `Completed`
+  do not merge unrelated shows. Local grouping needs no metadata key or rescan.
+- Home Watchlist and Unwatched rows now collapse episodes into one show tile
+  before limiting the row to 20 items. Each tile opens seasons and episodes;
+  row filters remain intact. Continue Watching and Search retain episode results.
+- Read-only validation against the owner's existing library found all 192 `24`
+  episode files grouped into one show with eight seasons of 24 episodes each.
+  Two unnumbered bonus clips remain separate; the media guide explains Specials.
+- Local Android validation passed 96 JVM tests (54 core, 42 app), debug lint
+  with zero errors and three existing warnings, and both debug APK builds.
+  The updated app was installed without clearing the user's library. The owner
+  confirmed grouping looks fixed and requested a push and merge to the default
+  branch, which is `main`. Hosted Apple and Android validation must be checked
+  before that merge; do not infer success from the local Android results.
+- The user stopped desktop control with Escape before the automated visual
+  navigation check completed. Do not describe that click-through as verified.
+- TVNavigationTest now refreshes API 34+ accessibility caches before polling
+  visible labels, matching the existing Watchlist test and preserving D-pad
+  actions and all screen assertions. Run the full suite only in isolated CI.

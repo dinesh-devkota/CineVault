@@ -1,6 +1,8 @@
 package com.dineshdevkota.cinevault.ui
 
 import com.dineshdevkota.cinevault.core.EpisodeParser
+import com.dineshdevkota.cinevault.core.LibraryQuery
+import com.dineshdevkota.cinevault.core.MediaKind
 import com.dineshdevkota.cinevault.data.MovieEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -12,6 +14,71 @@ class TVShowGroupsTest {
         return MovieEntity(sourceId = "nas", filePath = path, fileName = path.substringAfterLast('/'),
             fileSize = 10, parsedTitle = info.seriesTitle, parsedYear = info.year,
             title = "Episode ${info.episode}", year = info.year)
+    }
+
+    private fun movie(path: String): MovieEntity = MovieEntity(
+        sourceId = "nas", filePath = path, fileName = path.substringAfterLast('/'),
+        fileSize = 10, parsedTitle = path.substringAfterLast('/'), parsedYear = null,
+        title = path.substringAfterLast('/'), year = null,
+    )
+
+    private fun twentyFourEpisodes(): List<MovieEntity> = (1..8).flatMap { season ->
+        (1..24).map { number ->
+            val episodeNumber = number.toString().padStart(2, '0')
+            val path = when (season) {
+                1 -> "TV Shows/24/24 Season 1/24 Season 1/24 - S01xE$episodeNumber.mp4"
+                in 2..4 -> "TV Shows/24/24 Season $season/24 - [${season}x$episodeNumber] - Day $season  8 00 A.M. - 9 00 A.M.mkv"
+                in 5..7 -> "TV Shows/24/24 Season $season/24 - Day $season - [${season}x$episodeNumber].mkv"
+                else -> "TV Shows/24/24 Season 8/24 - 8x$episodeNumber - Day 8  4 00 P.M. - 5 00 P.M..mkv"
+            }
+            episode(path)
+        }
+    }
+
+    @Test fun allEightTwentyFourSeasonsGroupWithoutStoredTVMetadata() {
+        val episodes = twentyFourEpisodes()
+        assertTrue(episodes.all { it.seriesTitle == null && it.seriesTmdbId == null && it.seasonNumber == null })
+        assertTrue(episodes.all { it.mediaKind == MediaKind.TV_SHOW })
+        val show = groupTVShows(episodes).single()
+        assertEquals("24", show.title)
+        assertEquals((1..8).toList(), show.seasons)
+        assertEquals(192, show.episodes.size)
+        for (season in show.seasons) {
+            assertEquals((1..24).toList(), show.episodes.filter { tvSeason(it) == season }.map(::tvEpisode).sorted())
+        }
+        val extras = listOf(movie("TV Shows/24/24 Season 1/24 EXTRAS/Behind the Scenes.mp4"),
+            movie("TV Shows/24/24 Season 1/24 EXTRAS/Cast Interviews.mp4"))
+        val items = collectionItems(episodes + extras)
+        assertEquals(3, items.size)
+        assertEquals(extras, items.filterIsInstance<CollectionItem.Movie>().map { it.movie })
+        assertEquals(192, items.filterIsInstance<CollectionItem.Show>().single().show.episodes.size)
+    }
+
+    @Test fun collectionRowsGroupBeforeTheirLimitAndPreserveMixedOrdering() {
+        val episodes = twentyFourEpisodes()
+        val firstMovie = movie("Movies/First.mp4")
+        val secondMovie = movie("Movies/Second.mp4")
+        val moreMovies = (1..25).map { movie("Movies/More $it.mp4") }
+        val items = collectionItems(listOf(firstMovie) + episodes.take(80) + secondMovie + episodes.drop(80) + moreMovies, limit = 20)
+        assertEquals(20, items.size)
+        assertEquals(firstMovie, (items[0] as CollectionItem.Movie).movie)
+        assertEquals("24", (items[1] as CollectionItem.Show).show.title)
+        assertEquals(192, (items[1] as CollectionItem.Show).show.episodes.size)
+        assertEquals(secondMovie, (items[2] as CollectionItem.Movie).movie)
+        assertTrue(collectionItems(episodes, limit = 0).isEmpty())
+        assertTrue(collectionItems(episodes, limit = -1).isEmpty())
+    }
+
+    @Test fun collectionRowsKeepWatchlistAndUnwatchedEpisodeFilters() {
+        val watched = episode("TV/Example/Season 1/Example.S01E01.mkv").copy(isWatched = true, isWatchlisted = true)
+        val watchlisted = episode("TV/Example/Season 1/Example.S01E02.mkv").copy(isWatchlisted = true)
+        val other = episode("TV/Example/Season 2/Example.S02E01.mkv")
+        val movies = listOf(watched, watchlisted, other)
+        val watchlist = collectionItems(LibraryQuery.watchlist(movies)).single() as CollectionItem.Show
+        assertEquals(setOf(watched.id, watchlisted.id), watchlist.show.episodes.map { it.id }.toSet())
+        val unwatched = collectionItems(movies.filter { !it.isWatched }).single() as CollectionItem.Show
+        assertEquals(listOf(watchlisted, other), unwatched.show.episodes)
+        assertEquals(listOf(1, 2), unwatched.show.seasons)
     }
 
     @Test fun localFilenamesGroupIntoShowsAndNumericallyOrderedSeasons() {

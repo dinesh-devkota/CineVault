@@ -131,23 +131,31 @@ fun RootScreen() {
     }
 }
 
+private enum class HomeShowCollection { ALL, WATCHLIST, UNWATCHED }
+
 @Composable
 private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
     val context = LocalContext.current
     var selectedShowId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedShowCollection by rememberSaveable { mutableStateOf(HomeShowCollection.ALL) }
     val status by LocalContext.current.container.scanner.status.collectAsStateWithLifecycle()
     val available = remember(movies) { movies.filter { !it.isHidden && !it.isMissing }.sortedByDescending { it.addedAt } }
     val collections = remember(available) { available.groupBy { it.mediaKind } }
     val continuing = remember(movies) { LibraryQuery.continueWatching(movies).filter { it.mediaKind != MediaKind.MUSIC }.take(20) }
-    val watchlist = remember(movies) { LibraryQuery.watchlist(movies).take(20) }
-    val unwatched = remember(available) { available.filter { !it.isWatched }.take(20) }
+    val watchlist = remember(movies) { LibraryQuery.watchlist(movies) }
+    val unwatched = remember(available) { available.filter { !it.isWatched } }
     val featured = remember(available) {
         val fresh = available.filter { !it.isWatched && !it.isInProgress && it.mediaKind != MediaKind.MUSIC }
         fresh.firstOrNull { it.backdropPath != null } ?: fresh.firstOrNull() ?: available.firstOrNull()
     }
 
     if (selectedShowId != null) {
-        TVShowBrowser(collections[MediaKind.TV_SHOW].orEmpty(), onOpen,
+        val selectedEpisodes = when (selectedShowCollection) {
+            HomeShowCollection.ALL -> collections[MediaKind.TV_SHOW].orEmpty()
+            HomeShowCollection.WATCHLIST -> watchlist.filter { it.mediaKind == MediaKind.TV_SHOW }
+            HomeShowCollection.UNWATCHED -> unwatched.filter { it.mediaKind == MediaKind.TV_SHOW }
+        }
+        TVShowBrowser(selectedEpisodes, onOpen,
             initialShowId = selectedShowId, onExit = { selectedShowId = null })
         return
     }
@@ -173,16 +181,29 @@ private fun HomeTab(movies: List<MovieEntity>, onOpen: (MovieEntity) -> Unit) {
             }
         } else {
             if (continuing.isNotEmpty()) item { MovieRow("Continue Watching", continuing, onOpen, wide = true) }
-            if (watchlist.isNotEmpty()) item { MovieRow("Watchlist", watchlist, onOpen) }
+            if (watchlist.isNotEmpty()) item {
+                CollectionRow("Watchlist", watchlist, onOpen) {
+                    selectedShowCollection = HomeShowCollection.WATCHLIST
+                    selectedShowId = it
+                }
+            }
             featured?.let { movie -> item { FeaturedCard(movie, onClick = { onOpen(movie) }) } }
             for (kind in MediaKind.entries) {
                 val collection = collections[kind].orEmpty()
                 if (collection.isNotEmpty()) item {
-                    if (kind == MediaKind.TV_SHOW) TVShowRow(collection) { selectedShowId = it }
+                    if (kind == MediaKind.TV_SHOW) TVShowRow(collection) {
+                        selectedShowCollection = HomeShowCollection.ALL
+                        selectedShowId = it
+                    }
                     else MovieRow(kind.label, collection.take(20), onOpen)
                 }
             }
-            if (unwatched.isNotEmpty()) item { MovieRow("Unwatched", unwatched, onOpen) }
+            if (unwatched.isNotEmpty()) item {
+                CollectionRow("Unwatched", unwatched, onOpen) {
+                    selectedShowCollection = HomeShowCollection.UNWATCHED
+                    selectedShowId = it
+                }
+            }
         }
     }
 }

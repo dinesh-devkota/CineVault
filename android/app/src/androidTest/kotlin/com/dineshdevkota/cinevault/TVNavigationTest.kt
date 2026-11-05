@@ -1,11 +1,12 @@
 package com.dineshdevkota.cinevault
 
+import android.os.Build
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Condition
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -59,7 +60,7 @@ class TVNavigationTest {
         val xml = ByteArrayOutputStream().also { device.dumpWindowHierarchy(it) }.toString("UTF-8")
         val relevant = Regex("<node\\b[^>]*>").findAll(xml).map { it.value }.filter { node ->
             node.contains("focused=\"true\"") || node.contains("selected=\"true\"") ||
-                listOf("Home", "Movies", "Search", "Sources", "Settings").any { node.contains("text=\"$it\"") }
+                listOf("Home", "Library", "Search", "Sources", "Settings").any { node.contains("text=\"$it\"") }
         }.map { node ->
             val attributes = Regex("([\\w-]+)=\"([^\"]*)\"").findAll(node)
                 .associate { it.groupValues[1] to it.groupValues[2] }
@@ -70,9 +71,19 @@ class TVNavigationTest {
     }
 
     private fun visible(text: String) {
-        val found = device.wait(Until.hasObject(By.text(text)), 10_000)
+        val found = device.wait(Condition<UiDevice, Boolean> { hasVisibleText(text) }, 10_000)
         if (!found) captureFocus("assertion timeout")
         assertTrue("Expected TV screen text: $text\n${focusSnapshots.joinToString("\n").take(3_600)}", found)
         device.waitForIdle()
+    }
+
+    private fun hasVisibleText(text: String): Boolean {
+        // Refresh cached Compose nodes after switching tabs, as the watchlist tests do.
+        if (Build.VERSION.SDK_INT >= 34) {
+            InstrumentationRegistry.getInstrumentation().uiAutomation.clearCache()
+        }
+        return device.findObjects(By.text(text)).any { node ->
+            node.text == text && !node.visibleBounds.isEmpty
+        }
     }
 }

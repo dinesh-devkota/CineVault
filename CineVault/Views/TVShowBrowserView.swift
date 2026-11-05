@@ -73,6 +73,38 @@ struct TVShowGroup: Identifiable {
     }
 }
 
+/// Normal collection rows contain one tile per show; playback rows keep individual episodes.
+enum CollectionRowItem: Identifiable {
+    case movie(Movie)
+    case show(TVShowGroup)
+
+    var id: String {
+        switch self {
+        case .movie(let movie): return "movie:\(movie.id)"
+        case .show(let show): return "show:\(show.id)"
+        }
+    }
+
+    /// Group the full filtered collection before limiting tiles, preserving its first-occurrence order.
+    static func grouped(_ movies: [Movie], limit: Int = 20) -> [CollectionRowItem] {
+        guard limit > 0 else { return [] }
+        let shows = TVShowGroup.groups(movies.filter { $0.mediaKind == .tvShow })
+        var showByEpisode: [UUID: TVShowGroup] = [:]
+        for show in shows {
+            for episode in show.episodes { showByEpisode[episode.id] = show }
+        }
+        var seen: Set<String> = []
+        var result: [CollectionRowItem] = []
+        for movie in movies {
+            let item = showByEpisode[movie.id].map(CollectionRowItem.show) ?? .movie(movie)
+            guard seen.insert(item.id).inserted else { continue }
+            result.append(item)
+            if result.count == limit { break }
+        }
+        return result
+    }
+}
+
 struct TVShowBrowserView: View {
     let episodes: [Movie]
     var initialShowID: String? = nil
@@ -176,6 +208,53 @@ struct TVShowBrowserView: View {
         if selectedSeason != nil { selectedSeason = nil }
         else if initialShowID != nil { dismiss() }
         else { selectedShowID = nil; selectedEpisodeID = nil }
+    }
+}
+
+struct CollectionPosterRow: View {
+    let title: String
+    let movies: [Movie]
+    @State private var items: [CollectionRowItem] = []
+    @FocusState private var focusedItem: String?
+
+    var body: some View {
+        Group {
+            if !items.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 32, weight: .semibold))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 42) {
+                            ForEach(items) { item in
+                                switch item {
+                                case .movie(let movie):
+                                    NavigationLink(value: movie) {
+                                        PosterView(movie: movie, isFocused: focusedItem == item.id)
+                                    }
+                                    .buttonStyle(.plain).focused($focusedItem, equals: item.id)
+                                case .show(let show):
+                                    NavigationLink {
+                                        ScrollView {
+                                            TVShowBrowserView(episodes: show.episodes, initialShowID: show.id)
+                                                .padding(.horizontal, 70).padding(.bottom, 100)
+                                        }
+                                        .background(CinemaBackground())
+                                    } label: {
+                                        TVShowArtwork(title: show.title, subtitle: "\(show.seasons.count) seasons",
+                                            path: show.posterPath, focused: focusedItem == item.id)
+                                    }
+                                    .buttonStyle(.plain).focused($focusedItem, equals: item.id)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 24)
+                    }
+                    .scrollClipDisabled()
+                }
+            }
+        }
+        .onChange(of: movies.map(TVShowGroup.revision), initial: true) { _, _ in
+            items = CollectionRowItem.grouped(movies)
+        }
     }
 }
 
