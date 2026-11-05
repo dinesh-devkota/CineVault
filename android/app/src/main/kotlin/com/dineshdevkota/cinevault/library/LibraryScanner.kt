@@ -6,6 +6,7 @@ import com.dineshdevkota.cinevault.core.MediaFile
 import com.dineshdevkota.cinevault.core.MediaKind
 import com.dineshdevkota.cinevault.core.LibrarySync
 import com.dineshdevkota.cinevault.core.RemoteFile
+import com.dineshdevkota.cinevault.core.ScanExclusions
 import com.dineshdevkota.cinevault.data.CineVaultDatabase
 import com.dineshdevkota.cinevault.data.MovieEntity
 import com.dineshdevkota.cinevault.data.SecretBox
@@ -71,19 +72,27 @@ class LibraryScanner(
         try {
             val movies = database.movies()
             val config = source.config(secrets)
-            val files = if (scanWithProgress == null) scanVideos(config) else scanWithProgress(config) { progress ->
+            val foundPaths = mutableSetOf<String>()
+            val scanned = if (scanWithProgress == null) scanVideos(config) else scanWithProgress(config) { progress ->
+                val allowed = progress.files.filter {
+                    MediaFile.shouldIndex(it.path, it.size) &&
+                        !ScanExclusions.isFileExcluded(it.path, config.rootPath, config.ignoredFolders, config.ignoredFiles)
+                }
                 database.withTransaction {
                     check(database.sources().get(source.id) == source) { "The NAS source changed during the scan. Scan again." }
-                    val existing = if (progress.files.isEmpty()) emptyMap() else
-                        movies.forPaths(source.id, progress.files.map { it.path }).associateBy { it.filePath }
-                    for (file in progress.files) {
+                    val existing = if (allowed.isEmpty()) emptyMap() else
+                        movies.forPaths(source.id, allowed.map { it.path }).associateBy { it.filePath }
+                    for (file in allowed) {
                         val current = existing[file.path]
                         if (current == null) { movies.insert(newEntry(source.id, file)); partialAdded++ }
                         else movies.markPresent(current.id, file.size)
                     }
                 }
-                statusFlow.value = "Scanning ${source.name}: ${progress.found} items in ${progress.folders} folders…"
+                foundPaths.addAll(allowed.map { it.path })
+                statusFlow.value = "Scanning ${source.name}: ${foundPaths.size} items in ${progress.folders} folders…"
             }
+            val files = scanned.filter { MediaFile.shouldIndex(it.path, it.size) &&
+                !ScanExclusions.isFileExcluded(it.path, config.rootPath, config.ignoredFolders, config.ignoredFiles) }
             val added = database.withTransaction {
                 // An edit/delete can finish while the NAS operation is suspended. Never apply
                 // the old share's results to the replacement source (or recreate deleted rows).

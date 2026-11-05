@@ -63,6 +63,15 @@ private fun MediaGuideScreen() {
         }
         item {
             GuideSection(
+                "Choose folders and files to ignore",
+                "Open Sources → Edit. Choose the scan folder from the dropdown, then open the ignore picker. " +
+                    "Ignore a whole folder and its subfolders, or one file. Save & Scan applies the exclusions " +
+                    "without deleting NAS files or watch history. Include again and rescan to restore them. " +
+                    "TypeScript code and node_modules are skipped; genuine .ts video files are checked before import.",
+            )
+        }
+        item {
+            GuideSection(
                 "Names that help matching",
                 "Media/Movies/Arrival (2016)/Arrival (2016).mkv\n" +
                     "Media/Documentaries/Title (2020)/Title (2020).mp4\n" +
@@ -86,6 +95,15 @@ private fun MediaGuideScreen() {
                 "Use S01E01-style episode names. Open a show's poster, choose a season, then an episode. " +
                     "Keep audio music in artist/album folders. TMDB's Music category is for screen content; " +
                     "it does not provide an MP3 album catalog.",
+            )
+        }
+        item {
+            GuideSection(
+                "Supported playback formats",
+                "Video: MP4, M4V, MOV, MKV, WebM, AVI, standard MPEG-TS, MPEG-PS, and FLV. " +
+                    "Audio: MP3, M4A, AAC, FLAC, WAV, Ogg, and Opus. The TV must also support the codecs " +
+                    "inside the file. WMV, ISO, M2TS, WMA, and AIFF can be cataloged but do not have Play " +
+                    "controls in this Android app. TypeScript .ts and .d.ts files are not media.",
             )
         }
         item {

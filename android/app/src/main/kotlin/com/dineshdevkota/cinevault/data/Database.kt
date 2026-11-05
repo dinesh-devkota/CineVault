@@ -165,7 +165,7 @@ interface MovieDao {
     suspend fun resetToFile(id: String, title: String, sortTitle: String, year: Int?, tmdbId: Int?, noGenresJson: String)
 }
 
-@Database(entities = [SourceEntity::class, MovieEntity::class], version = 3, exportSchema = false)
+@Database(entities = [SourceEntity::class, MovieEntity::class], version = 4, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class CineVaultDatabase : RoomDatabase() {
     abstract fun sources(): SourceDao
@@ -188,9 +188,16 @@ abstract class CineVaultDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sources ADD COLUMN ignoredFolders TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE sources ADD COLUMN ignoredFiles TEXT NOT NULL DEFAULT '[]'")
+            }
+        }
+
         fun create(context: Context, name: String = "cinevault.db"): CineVaultDatabase =
             Room.databaseBuilder(context, CineVaultDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

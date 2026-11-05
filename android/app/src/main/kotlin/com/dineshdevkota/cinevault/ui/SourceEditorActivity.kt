@@ -36,6 +36,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.data.SourceEntity
+import com.dineshdevkota.cinevault.data.saveSourceWithExclusions
 import com.dineshdevkota.cinevault.smb.SmbService
 import com.dineshdevkota.cinevault.smb.SourceConfig
 import kotlinx.coroutines.CancellationException
@@ -73,6 +74,10 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
     var port by remember { mutableStateOf("") }
     var share by remember { mutableStateOf("") }
     var rootPath by remember { mutableStateOf("") }
+    var ignoredFolders by remember { mutableStateOf(emptyList<String>()) }
+    var ignoredFiles by remember { mutableStateOf(emptyList<String>()) }
+    var manualRoot by remember { mutableStateOf(false) }
+    var exclusionsNotice by remember { mutableStateOf<String?>(null) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -91,6 +96,8 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
         port = source.port?.toString().orEmpty()
         share = source.share
         rootPath = source.rootPath
+        ignoredFolders = source.ignoredFolders
+        ignoredFiles = source.ignoredFiles
         username = source.username
         try {
             password = withContext(Dispatchers.IO) { container.secrets.decrypt(source.encryptedPassword) }
@@ -126,7 +133,21 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
             rootPath = rootPath.trim().trim('/', '\\', ' '),
             username = username.trim(),
             password = password,
+            ignoredFolders = ignoredFolders,
+            ignoredFiles = ignoredFiles,
         )
+    }
+
+    fun clearExclusionsForSourceChange() {
+        if (ignoredFolders.isNotEmpty() || ignoredFiles.isNotEmpty()) {
+            ignoredFolders = emptyList(); ignoredFiles = emptyList()
+            exclusionsNotice = "NAS connection or scan folder changed. Previous ignore rules were cleared; choose new rules below."
+        }
+    }
+
+    fun changeRoot(value: String) {
+        if (value != rootPath) clearExclusionsForSourceChange()
+        rootPath = value
     }
 
     fun launchWork(work: suspend () -> Unit) {
@@ -146,6 +167,8 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
     }
 
     val idle = !busy && !scanning
+    val browseConfig = SourceConfig(existing?.id ?: draftId, host.trim(), port.trim().toIntOrNull(),
+        share.trim(), rootPath.trim(), username.trim(), password, ignoredFolders, ignoredFiles)
     Column(
         Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())
             .padding(horizontal = ScreenPadding, vertical = 32.dp),
@@ -163,14 +186,14 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
                 )
                 TvTextField(
                     host,
-                    { host = it },
+                    { if (host != it) clearExclusionsForSourceChange(); host = it },
                     "Host or IP (e.g. 192.168.1.20)",
                     Modifier.fillMaxWidth(),
                     keyboardType = KeyboardType.Uri,
                 )
                 TvTextField(
                     port,
-                    { port = it },
+                    { if (port != it) clearExclusionsForSourceChange(); port = it },
                     "Port (optional, default 445)",
                     Modifier.fillMaxWidth(),
                     keyboardType = KeyboardType.Number,
@@ -180,14 +203,11 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Folder", style = MaterialTheme.typography.titleMedium)
-                TvTextField(share, { share = it }, "Share (e.g. media)", Modifier.fillMaxWidth())
-                TvTextField(
-                    rootPath,
-                    { rootPath = it },
-                    "Folder inside share (e.g. Movies)",
-                    Modifier.fillMaxWidth(),
-                    imeAction = ImeAction.Done,
-                )
+                TvTextField(share, { if (share != it) clearExclusionsForSourceChange(); share = it }, "Share (e.g. media)", Modifier.fillMaxWidth())
+                NasRootFolderPicker(browseConfig, idle, ::changeRoot)
+                OutlinedButton(enabled = idle, onClick = { manualRoot = !manualRoot }) { Text("Enter folder path manually") }
+                if (manualRoot) TvTextField(rootPath, ::changeRoot, "Folder inside share (empty for share root)",
+                    Modifier.fillMaxWidth(), imeAction = ImeAction.Done, enabled = idle)
                 Text(
                     "Use a NAS account with read access. The password is encrypted on this device.",
                     style = MaterialTheme.typography.bodySmall,
@@ -195,6 +215,9 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
                 )
             }
         }
+        exclusionsNotice?.let { Text(it, color = SecondaryText) }
+        IgnoredFoldersEditor(browseConfig, ignoredFolders, ignoredFiles,
+            { ignoredFolders = it }, { ignoredFiles = it }, idle)
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             OutlinedButton(
                 enabled = idle,
@@ -224,8 +247,10 @@ private fun SourceEditorScreen(sourceId: String?, onClose: () -> Unit) {
                             username = c.username,
                             encryptedPassword = sealed,
                             lastScanAt = existing?.lastScanAt,
+                            ignoredFolders = c.ignoredFolders,
+                            ignoredFiles = c.ignoredFiles,
                         )
-                        container.database.sources().upsert(entity)
+                        container.database.saveSourceWithExclusions(entity)
                         container.smb.reset(entity.id)
                         container.scope.launch { container.scanner.scan(entity.id) }
                         onClose()

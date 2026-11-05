@@ -40,6 +40,19 @@ def main() -> None:
     sparse_file(root / "Movies" / "@eaDir" / "Ignored.mp4")
     (root / "Movies" / "Too Small.mp4").write_bytes(b"small")
 
+    # Small, non-playback fixtures for scanner type detection and exclusion rules.
+    checks = root / "MediaChecks"
+    checks.mkdir(parents=True, exist_ok=True)
+    (checks / "code.ts").write_bytes(b"export const title: string = 'fixture';\n")
+    (checks / "types.d.ts").write_bytes(b"declare const title: string;\n")
+    packet = bytes([0x47, 0x1F, 0xFF, 0x10]) + bytes(184)
+    (checks / "clip.ts").write_bytes(packet * 6)
+    (checks / "Keep.mp4").write_bytes(b"scan-fixture-only")
+    (checks / "Ignored").mkdir(exist_ok=True)
+    (checks / "Ignored" / "Hidden.mp4").write_bytes(b"scan-fixture-only")
+    (checks / "node_modules").mkdir(exist_ok=True)
+    (checks / "node_modules" / "Not Media.mp4").write_bytes(b"scan-fixture-only")
+
     logging.basicConfig(level=logging.INFO)
     server = smbserver.SimpleSMBServer(listenAddress="127.0.0.1", listenPort=1445)
     server.addShare("CINEVAULT", str(root), readOnly="yes")

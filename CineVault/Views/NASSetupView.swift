@@ -17,6 +17,9 @@ struct NASSetupView: View {
     @State private var password = ""
     @State private var share = ""
     @State private var path = ""
+    @State private var ignoredFolders: [String] = []
+    @State private var ignoredFiles: [String] = []
+    @State private var exclusionsNotice: String?
     @State private var shares: [String] = []
     @State private var folders: [String] = []
     @State private var folderReady = false
@@ -63,7 +66,8 @@ struct NASSetupView: View {
                     if !discovery.searching && discovery.devices.isEmpty && discovery.error == nil {
                         Text("No devices advertised. Enter your NAS address below.").foregroundStyle(.secondary)
                     }
-                    Button("Refresh devices") { discovery.start() }.disabled(busy)
+                    Button(discovery.searching ? "Searching…" : "Refresh devices") { discovery.start() }
+                        .disabled(busy || discovery.searching)
                 }
                 Section("NAS connection") {
                     TextField("Library name", text: $name)
@@ -104,8 +108,12 @@ struct NASSetupView: View {
                 Section {
                     Button("Enter a share manually") { showManualShare.toggle() }
                     if showManualShare {
-                        TextField("Share name", text: Binding(get: { share }, set: { share = $0; invalidate() }))
-                        TextField("Folder within share (optional)", text: Binding(get: { path }, set: { path = $0; invalidate() }))
+                        TextField("Share name", text: Binding(get: { share }, set: {
+                            if share != $0 { clearExclusions() }; share = $0; invalidate()
+                        }))
+                        TextField("Folder within share (optional)", text: Binding(get: { path }, set: {
+                            if path != $0 { clearExclusions() }; path = $0; invalidate()
+                        }))
                         Button("Open folder") { browse(share: share, path: path) }
                     }
                 }.disabled(busy)
@@ -128,6 +136,11 @@ struct NASSetupView: View {
                     }
                     if scanner.isScanning { Text("Wait for the current library scan to finish.") }
                 }
+                if let exclusionsNotice { Text(exclusionsNotice).font(.caption).foregroundStyle(.secondary) }
+                SourceExclusionsEditor(folders: $ignoredFolders, files: $ignoredFiles,
+                    configuration: SourceConfig(id: requestID, host: host, port: Int(port), share: share, rootPath: path,
+                        username: username, password: password, ignoredFolders: ignoredFolders, ignoredFiles: ignoredFiles))
+                    .disabled(busy || !folderReady)
             }
         }
     }
@@ -140,7 +153,14 @@ struct NASSetupView: View {
     private func invalidate(clearSelection: Bool = false) {
         cancelRequest()
         shares = []; folders = []; folderReady = false; errorText = nil
-        if clearSelection { share = ""; path = "" }
+        if clearSelection { clearExclusions(); share = ""; path = "" }
+    }
+
+    private func clearExclusions() {
+        if !ignoredFolders.isEmpty || !ignoredFiles.isEmpty {
+            ignoredFolders = []; ignoredFiles = []
+            exclusionsNotice = "The scan folder changed. Choose ignored paths again for the new folder."
+        }
     }
 
     private func goBack() {
@@ -166,7 +186,8 @@ struct NASSetupView: View {
         let cleanPath = path.replacingOccurrences(of: "\\", with: "/").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard !cleanPath.split(separator: "/").contains("..") else { errorText = "Choose a folder within this share."; return nil }
         return SourceConfig(id: UUID(), host: cleanHost, port: number, share: cleanShare, rootPath: cleanPath,
-            username: username.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
+            username: username.trimmingCharacters(in: .whitespacesAndNewlines), password: password,
+            ignoredFolders: ignoredFolders, ignoredFiles: ignoredFiles)
     }
 
     private func run(_ config: SourceConfig, operation: @escaping @MainActor (UUID) async throws -> Void) {
@@ -196,11 +217,13 @@ struct NASSetupView: View {
             let result = try await smb.listShares(config)
             try Task.checkCancellation()
             guard requestID == token else { return }
+            clearExclusions()
             shares = result; share = ""; path = ""; showManualShare = result.isEmpty; step = .shares
         }
     }
 
     private func browse(share selectedShare: String, path selectedPath: String) {
+        if selectedShare != share || selectedPath != path { clearExclusions() }
         share = selectedShare; path = selectedPath
         guard let config = configuration(requireShare: true) else { return }
         folders = []; folderReady = false; step = .folders
@@ -221,6 +244,7 @@ struct NASSetupView: View {
             guard requestID == token else { return }
             let source = MediaSource(name: savedName.isEmpty ? config.host : savedName,
                 host: config.host, port: config.port, share: config.share, rootPath: config.rootPath, username: config.username)
+            try source.applyIgnoredPaths(folders: config.ignoredFolders, files: config.ignoredFiles)
             try source.setPassword(config.password)
             context.insert(source)
             do { try context.save() }

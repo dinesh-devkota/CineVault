@@ -140,7 +140,8 @@ jobs:
                   print(f"::error title=Android runtime test::{case.get('classname')}.{case.get('name')}: {detail}")
           required = {"TVNavigationTest", "SecretBoxInstrumentedTest", "LibraryDatabaseTest", "MetadataMutationTest",
                       "LibraryScannerTest", "SmbDataSourceContractTest", "SmbIntegrationTest", "SmbPlaybackTest",
-                      "WatchlistMigrationTest", "WatchlistNavigationTest"}
+                      "WatchlistMigrationTest", "WatchlistNavigationTest", "NasBrowserIntegrationTest",
+                      "NasDiscoveryIntegrationTest"}
           executed = {case.get("classname", "").rsplit(".", 1)[-1] for case in cases}
           if not required <= executed or failures or skipped:
               raise SystemExit("Required runtime tests did not all execute successfully: " + str(sorted(required - executed)))

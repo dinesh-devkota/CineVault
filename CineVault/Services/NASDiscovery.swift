@@ -1,4 +1,5 @@
 import Combine
+import CineVaultCore
 import Foundation
 
 struct DiscoveredNAS: Identifiable, Equatable {
@@ -20,6 +21,10 @@ final class NASDiscovery: NSObject, ObservableObject,
     private var resolved: [String: DiscoveredNAS] = [:]
     private var deadline: Task<Void, Never>?
     private var generation: UInt = 0
+    private var timing = DiscoveryTiming(requestedAt: ProcessInfo.processInfo.systemUptime)
+    private var pending: Set<String> = []
+    private var attempts: [String: Int] = [:]
+    private var retries: [String: Task<Void, Never>] = [:]
 
     func start() {
         stop()
@@ -27,16 +32,33 @@ final class NASDiscovery: NSObject, ObservableObject,
         resolved = [:]
         error = nil
         searching = true
+        timing = DiscoveryTiming(requestedAt: ProcessInfo.processInfo.systemUptime)
         let current = NetServiceBrowser()
         browser = current
         current.delegate = self
         current.schedule(in: .main, forMode: .common)
         current.searchForServices(ofType: "_smb._tcp.", inDomain: "local.")
+        checkDeadline()
+    }
+
+    private func checkDeadline() {
+        guard searching else { return }
+        deadline?.cancel()
+        let remaining = timing.remaining(at: ProcessInfo.processInfo.systemUptime, pendingResolution: !pending.isEmpty)
+        guard remaining > 0 else {
+            if !timing.hasStarted {
+                error = "Network discovery did not start. Check your connection and try again."
+            } else if devices.isEmpty && !services.isEmpty {
+                error = "A NAS was found, but its address could not be resolved. Try again or enter its address manually."
+            }
+            stop()
+            return
+        }
         let token = generation
         deadline = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
             guard let self, self.generation == token else { return }
-            self.stop()
+            self.checkDeadline()
         }
     }
 
@@ -53,6 +75,10 @@ final class NASDiscovery: NSObject, ObservableObject,
         previous?.remove(from: .main, forMode: .common)
         for service in services.values { detach(service) }
         services.removeAll()
+        for retry in retries.values { retry.cancel() }
+        retries.removeAll()
+        pending.removeAll()
+        attempts.removeAll()
     }
 
     private func key(_ service: NetService) -> String {
@@ -73,22 +99,39 @@ final class NASDiscovery: NSObject, ObservableObject,
         }.filter { seen.insert($0.id).inserted }
     }
 
+    func netServiceBrowserWillSearch(_ browser: NetServiceBrowser) {
+        guard self.browser === browser, searching else { return }
+        timing.started(at: ProcessInfo.processInfo.systemUptime)
+        checkDeadline()
+    }
+
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         guard self.browser === browser, searching else { return }
         let identifier = key(service)
         guard services[identifier] == nil else { return }
         services[identifier] = service
+        pending.insert(identifier)
+        resolve(service)
+    }
+
+    private func resolve(_ service: NetService) {
+        attempts[key(service), default: 0] += 1
         service.delegate = self
         service.schedule(in: .main, forMode: .common)
         service.resolve(withTimeout: 6)
+        checkDeadline()
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
         guard self.browser === browser, searching else { return }
         let identifier = key(service)
         if let previous = services.removeValue(forKey: identifier) { detach(previous) }
+        retries.removeValue(forKey: identifier)?.cancel()
+        pending.remove(identifier)
+        attempts.removeValue(forKey: identifier)
         resolved.removeValue(forKey: identifier)
         publish()
+        checkDeadline()
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
@@ -114,8 +157,12 @@ final class NASDiscovery: NSObject, ObservableObject,
         guard !host.isEmpty else { resolutionFailed(sender); return }
         resolved[identifier] = DiscoveredNAS(id: "\(host.lowercased()):\(sender.port)",
             name: sender.name.isEmpty ? host : sender.name, host: host, port: sender.port)
+        pending.remove(identifier)
+        retries.removeValue(forKey: identifier)?.cancel()
+        detach(sender)
         error = nil
         publish()
+        checkDeadline()
     }
 
     func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
@@ -124,9 +171,24 @@ final class NASDiscovery: NSObject, ObservableObject,
 
     private func resolutionFailed(_ sender: NetService) {
         let identifier = key(sender)
-        guard searching, services[identifier] === sender else { return }
-        services.removeValue(forKey: identifier)
+        guard searching, services[identifier] === sender, pending.contains(identifier) else { return }
         detach(sender)
-        error = "A NAS was found, but its address could not be resolved. Try again or enter its address manually."
+        if attempts[identifier, default: 0] < 2 {
+            let token = generation
+            retries[identifier]?.cancel()
+            retries[identifier] = Task { [weak self] in
+                do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                guard let self, self.generation == token, self.searching,
+                      self.services[identifier] === sender, self.pending.contains(identifier) else { return }
+                self.retries.removeValue(forKey: identifier)
+                self.resolve(sender)
+            }
+        } else {
+            pending.remove(identifier)
+            if devices.isEmpty {
+                error = "A NAS was found, but its address could not be resolved. Try again or enter its address manually."
+            }
+        }
+        checkDeadline()
     }
 }

@@ -157,6 +157,8 @@ final class LibraryUpgradeTests: XCTestCase {
             XCTAssertEqual(source.port, 1445)
             XCTAssertEqual(source.share, "Video")
             XCTAssertEqual(source.rootPath, "Movies")
+            XCTAssertNil(source.ignoredFolders)
+            XCTAssertNil(source.ignoredFiles)
             XCTAssertEqual(source.username, "original-user")
             XCTAssertEqual(source.lastScanDate, scanned)
             XCTAssertEqual("source-\(source.id.uuidString)", account, "The source must continue to reference its original external credential account.")

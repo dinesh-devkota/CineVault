@@ -113,7 +113,10 @@ class MetadataService(private val database: CineVaultDatabase, val tmdb: TmdbCli
         val title = if (movie.isLocked) movie.title else movie.parsedTitle
         val year = if (movie.isLocked) movie.year else movie.parsedYear
         val best = title.takeIf { it.isNotBlank() }?.let { TitleMatcher.bestMatch(it, year, tmdb.search(it, year)) }
-        if (best != null) applyLocked(best.id, movie.id) else database.movies().markMetadataFetched(movie.id)
+        if (best != null) applyLocked(best.id, movie.id) else database.withTransaction {
+            val current = database.movies().get(movie.id) ?: return@withTransaction
+            if (sameMatch(current, movie)) database.movies().markMetadataFetched(movie.id)
+        }
     }
 
     private fun needsMetadata(movie: MovieEntity): Boolean = !movie.metadataFetched ||
@@ -193,9 +196,12 @@ class MetadataService(private val database: CineVaultDatabase, val tmdb: TmdbCli
     }
 
     private suspend fun applyLocked(tmdbId: Int, movieId: String, force: Boolean = false) {
-        val details = tmdb.details(tmdbId)
         val movies = database.movies()
+        val original = movies.get(movieId)?.takeUnless { it.isMissing } ?: return
+        val details = tmdb.details(tmdbId)
         database.withTransaction {
+            val current = movies.get(movieId) ?: return@withTransaction
+            if (!sameMatch(current, original)) return@withTransaction
             movies.applyMetadata(
                 id = movieId,
                 tmdbId = details.id,

@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 
 data class NasShare(val name: String, val comment: String = "")
+data class NasEntry(val name: String, val isDirectory: Boolean)
 
 /** Short-lived setup connections are independent of the playback connection cache. */
 class NasBrowser {
@@ -32,17 +33,21 @@ class NasBrowser {
         }.also { coroutineContext.ensureActive() }
     }
 
-    suspend fun listFolders(config: SourceConfig): List<String> = withContext(Dispatchers.IO) {
+    suspend fun listFolders(config: SourceConfig): List<String> =
+        listEntries(config).filter { it.isDirectory }.map { it.name }
+
+    /** Explicit browsing includes ignored paths so users can include them again. */
+    suspend fun listEntries(config: SourceConfig): List<NasEntry> = withContext(Dispatchers.IO) {
         coroutineContext.ensureActive()
         withSession(config) { session ->
             val connected = session.connectShare(config.share.trim('/', '\\'))
             connected.use {
                 val share = it as? DiskShare ?: throw SmbException("This is not a file share.")
                 share.list(SmbService.rootOf(config))
-                    .filter { entry -> entry.fileName != "." && entry.fileName != ".." &&
-                        EnumUtils.isSet(entry.fileAttributes, FileAttributes.FILE_ATTRIBUTE_DIRECTORY) }
-                    .map { entry -> entry.fileName }
-                    .sortedBy { name -> name.lowercase() }
+                    .filter { entry -> entry.fileName != "." && entry.fileName != ".." }
+                    .map { entry -> NasEntry(entry.fileName,
+                        EnumUtils.isSet(entry.fileAttributes, FileAttributes.FILE_ATTRIBUTE_DIRECTORY)) }
+                    .sortedWith(compareByDescending<NasEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
             }
         }.also { coroutineContext.ensureActive() }
     }

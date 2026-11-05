@@ -13,7 +13,7 @@ public enum VideoFile {
     }
 
     public static func isNativelyPlayable(path: String) -> Bool {
-        nativeExtensions.contains(fileExtension(path))
+        MediaFile.isPlaybackPathAllowed(path) && nativeExtensions.contains(fileExtension(path))
     }
 
     /// Skips samples, trailers, extras and NAS metadata folders/files.

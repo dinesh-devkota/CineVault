@@ -3,6 +3,7 @@ package com.dineshdevkota.cinevault.smb
 import com.dineshdevkota.cinevault.core.RemoteFile
 import com.dineshdevkota.cinevault.core.VideoFile
 import com.dineshdevkota.cinevault.core.MediaFile
+import com.dineshdevkota.cinevault.core.ScanExclusions
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.mssmb2.SMB2CreateDisposition
@@ -37,6 +38,8 @@ data class SourceConfig(
     val rootPath: String,
     val username: String,
     val password: String,
+    val ignoredFolders: List<String> = emptyList(),
+    val ignoredFiles: List<String> = emptyList(),
 ) {
     override fun toString(): String = "SourceConfig(id=$id, host=$host, share=$share)"
 }
@@ -186,13 +189,17 @@ class SmbService(
         while (pending.isNotEmpty()) {
             coroutineContext.ensureActive()
             val dir = pending.removeAt(pending.lastIndex)
+            if (ScanExclusions.isDirectoryExcluded(dir, config.rootPath, config.ignoredFolders)) continue
             for (entry in share.list(dir)) {
                 val name = entry.fileName
                 if (name == "." || name == "..") continue
                 val path = if (dir.isEmpty()) name else "$dir/$name"
                 if (EnumUtils.isSet(entry.fileAttributes, FileAttributes.FILE_ATTRIBUTE_DIRECTORY)) {
-                    if (!VideoFile.shouldSkipDirectory(name)) pending += path
-                } else if (VideoFile.shouldIndex(path, entry.endOfFile)) {
+                    if (!VideoFile.shouldSkipDirectory(name) && !MediaFile.shouldSkipDirectory(name) &&
+                        !ScanExclusions.isDirectoryExcluded(path, config.rootPath, config.ignoredFolders)) pending += path
+                } else if (VideoFile.shouldIndex(path, entry.endOfFile) && MediaFile.shouldIndex(path, entry.endOfFile) &&
+                    !ScanExclusions.isFileExcluded(path, config.rootPath, config.ignoredFolders, config.ignoredFiles) &&
+                    acceptsContent(share, path)) {
                     results += RemoteFile(path, entry.endOfFile)
                 }
             }
@@ -208,6 +215,7 @@ class SmbService(
         while (pending.isNotEmpty()) {
             coroutineContext.ensureActive()
             val dir = pending.removeAt(pending.lastIndex)
+            if (ScanExclusions.isDirectoryExcluded(dir, config.rootPath, config.ignoredFolders)) continue
             val batch = mutableListOf<RemoteFile>()
             for (entry in share.list(dir)) {
                 coroutineContext.ensureActive()
@@ -215,8 +223,11 @@ class SmbService(
                 if (name == "." || name == "..") continue
                 val path = if (dir.isEmpty()) name else "$dir/$name"
                 if (EnumUtils.isSet(entry.fileAttributes, FileAttributes.FILE_ATTRIBUTE_DIRECTORY)) {
-                    if (!MediaFile.shouldSkipDirectory(name)) pending += path
-                } else if (MediaFile.shouldIndex(path, entry.endOfFile)) {
+                    if (!MediaFile.shouldSkipDirectory(name) &&
+                        !ScanExclusions.isDirectoryExcluded(path, config.rootPath, config.ignoredFolders)) pending += path
+                } else if (MediaFile.shouldIndex(path, entry.endOfFile) &&
+                    !ScanExclusions.isFileExcluded(path, config.rootPath, config.ignoredFolders, config.ignoredFiles) &&
+                    acceptsContent(share, path)) {
                     val file = RemoteFile(path, entry.endOfFile)
                     results += file
                     batch += file
@@ -229,6 +240,32 @@ class SmbService(
             onProgress(ScanProgress(batch.toList(), results.size, ++folders))
         }
         results
+    }
+
+    /** Checks legacy playback candidates with the same bounded probe used while scanning. */
+    suspend fun hasPlayableContent(config: SourceConfig, path: String): Boolean {
+        if (!MediaFile.isPlayable(path)) return false
+        if (!MediaFile.requiresContentCheck(path)) return true
+        return withShare(config) { acceptsContent(it, path, playback = true) }
+    }
+
+    /** TypeScript shares the .ts suffix. Only read a small prefix for this ambiguous extension. */
+    private suspend fun acceptsContent(share: DiskShare, path: String, playback: Boolean = false): Boolean {
+        if (!MediaFile.requiresContentCheck(path)) return true
+        coroutineContext.ensureActive()
+        return share.openFile(path, EnumSet.of(AccessMask.GENERIC_READ), null, SMB2ShareAccess.ALL,
+            SMB2CreateDisposition.FILE_OPEN, null).use { file ->
+            val prefix = ByteArray(1024)
+            var read = 0
+            while (read < prefix.size) {
+                coroutineContext.ensureActive()
+                val count = file.read(prefix, read.toLong(), read, prefix.size - read)
+                if (count <= 0) break
+                read += count
+            }
+            val bytes = prefix.copyOf(read)
+            if (playback) MediaFile.isPlayableTransportStream(bytes) else MediaFile.isTransportStream(bytes)
+        }
     }
 
     /** Opens a file for streaming. Blocking; call from a background thread. */

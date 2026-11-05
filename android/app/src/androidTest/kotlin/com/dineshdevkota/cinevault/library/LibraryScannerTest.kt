@@ -8,6 +8,7 @@ import com.dineshdevkota.cinevault.data.CineVaultDatabase
 import com.dineshdevkota.cinevault.data.MovieEntity
 import com.dineshdevkota.cinevault.data.SecretBox
 import com.dineshdevkota.cinevault.data.SourceEntity
+import com.dineshdevkota.cinevault.data.saveSourceWithExclusions
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -111,5 +112,64 @@ class LibraryScannerTest {
         assertTrue(database.movies().get(old.id)!!.isMissing)
         assertTrue(database.sources().get(source.id)!!.lastScanAt != null)
         assertTrue(scanner.status.value!!.contains("1 movies, 1 documentaries, 0 TV episodes, 0 music items (2 new)"))
+    }
+
+    @Test fun savingExclusionsHidesExistingItemsAndRemovingRulesRestoresHistoryAfterRescan() = runBlocking {
+        val source = SourceEntity(name = "Media", host = "localhost", share = "Media", rootPath = "Library")
+        database.sources().upsert(source)
+        val folderItem = MovieEntity(sourceId = source.id, filePath = "Library/Private/Feature.mp4", fileName = "Feature.mp4",
+            fileSize = 100, parsedTitle = "Feature", parsedYear = null, title = "My title", year = null,
+            isLocked = true, isWatchlisted = true, isWatched = true, playbackPositionMs = 25_000)
+        val fileItem = folderItem.copy(id = "individual", filePath = "Library/One.mp4", fileName = "One.mp4")
+        val sibling = folderItem.copy(id = "sibling", filePath = "Library/Private Collection/Keep.mp4", fileName = "Keep.mp4")
+        listOf(folderItem, fileItem, sibling).forEach { database.movies().insert(it) }
+        database.saveSourceWithExclusions(source.copy(ignoredFolders = listOf("Private"), ignoredFiles = listOf("One.mp4")))
+        assertEquals(folderItem.copy(isMissing = true), database.movies().get(folderItem.id))
+        assertEquals(fileItem.copy(isMissing = true), database.movies().get(fileItem.id))
+        assertEquals(sibling, database.movies().get(sibling.id))
+        val remote = listOf(folderItem, fileItem, sibling).map { RemoteFile(it.filePath, it.fileSize) }
+        val scanner = LibraryScanner(database, SecretBox(), scanVideos = { remote })
+        scanner.scan(source.id)
+        assertTrue(database.movies().get(folderItem.id)!!.isMissing)
+        assertTrue(database.movies().get(fileItem.id)!!.isMissing)
+        val current = database.sources().get(source.id)!!
+        database.saveSourceWithExclusions(current.copy(ignoredFolders = emptyList(), ignoredFiles = emptyList()))
+        assertTrue(database.movies().get(folderItem.id)!!.isMissing)
+        scanner.scan(source.id)
+        assertEquals(folderItem, database.movies().get(folderItem.id))
+        assertEquals(fileItem, database.movies().get(fileItem.id))
+    }
+
+    @Test fun progressAndFinalResultsCannotIntroduceExcludedFilesOrCode() = runBlocking {
+        val source = SourceEntity(name = "Media", host = "localhost", share = "Media", rootPath = "Library",
+            ignoredFolders = listOf("Private"), ignoredFiles = listOf("Skip.mp4"))
+        database.sources().upsert(source)
+        val files = listOf("Library/Private/Hidden.mp4", "Library/Skip.mp4", "Library/fetch.d.ts",
+            "Library/node_modules/demo.mp4", "Library/Keep.mp4").map { RemoteFile(it, 100) }
+        val scanner = LibraryScanner(database, SecretBox(), scanVideos = { error("Use progress") },
+            scanWithProgress = { config, report ->
+                assertEquals(source.ignoredFiles, config.ignoredFiles)
+                report(ScanProgress(files, files.size, 2))
+                assertEquals(listOf("Library/Keep.mp4"), database.movies().forSource(source.id).map { it.filePath })
+                files
+            })
+        scanner.scan(source.id)
+        assertEquals(listOf("Library/Keep.mp4"), database.movies().forSource(source.id).map { it.filePath })
+        assertTrue(scanner.status.value!!.contains("1 movies"))
+    }
+
+    @Test fun changedExclusionsInvalidateAnInFlightScanAndKeepPreviousItemsUnavailable() = runBlocking {
+        val source = SourceEntity(name = "Media", host = "localhost", share = "Media")
+        database.sources().upsert(source)
+        val old = MovieEntity(sourceId = source.id, filePath = "Private/Old.mp4", fileName = "Old.mp4", fileSize = 100,
+            parsedTitle = "Old", parsedYear = null, title = "Old", year = null, isWatchlisted = true)
+        database.movies().insert(old)
+        val scanner = LibraryScanner(database, SecretBox(), scanVideos = {
+            database.saveSourceWithExclusions(source.copy(ignoredFolders = listOf("Private")))
+            listOf(RemoteFile(old.filePath, 100), RemoteFile("Private/New.mp4", 100))
+        })
+        scanner.scan(source.id)
+        assertEquals(listOf(old.copy(isMissing = true)), database.movies().forSource(source.id))
+        assertNull(database.sources().get(source.id)!!.lastScanAt)
     }
 }

@@ -31,6 +31,30 @@ final class SMBIntegrationTests: XCTestCase {
         await service.reset(config)
     }
 
+    @MainActor
+    func testMediaScanChecksTransportStreamsAndSkipsIgnoredFoldersBeforeTraversal() async throws {
+        let service = SMBService(timeout: 5)
+        let baseline = configuration(rootPath: "MediaChecks")
+        let files = try await service.scanMedia(baseline) { _ in }
+        XCTAssertEqual(Set(files.map { ($0.path as NSString).lastPathComponent }), ["clip.ts", "Keep.mp4", "Hidden.mp4"])
+        await service.reset(baseline)
+
+        let ignored = configuration(rootPath: "MediaChecks", ignoredFolders: ["Ignored"], ignoredFiles: ["Keep.mp4"])
+        var reported: [String] = []
+        var visitedFolders = 0
+        let filtered = try await service.scanMedia(ignored) { progress in
+            reported.append(contentsOf: progress.files.map(\.path))
+            visitedFolders = progress.folders
+        }
+        XCTAssertEqual(filtered.map { ($0.path as NSString).lastPathComponent }, ["clip.ts"])
+        XCTAssertEqual(reported, filtered.map(\.path))
+        XCTAssertEqual(visitedFolders, 1, "Ignored and node_modules folders must not be traversed.")
+        let entries = try await service.listEntries(ignored)
+        XCTAssertTrue(entries.contains { $0.name == "Ignored" && $0.isDirectory })
+        XCTAssertTrue(entries.contains { $0.name == "Keep.mp4" && !$0.isDirectory })
+        await service.reset(ignored)
+    }
+
     private actor ReadGate {
         private(set) var attempts = 0
         private var released = false
@@ -57,9 +81,11 @@ final class SMBIntegrationTests: XCTestCase {
         case expected
     }
 
-    private func configuration(password: String = "fixture-only") -> SourceConfig {
+    private func configuration(password: String = "fixture-only", rootPath: String = "Movies",
+                               ignoredFolders: [String] = [], ignoredFiles: [String] = []) -> SourceConfig {
         SourceConfig(id: UUID(), host: "127.0.0.1", port: 1445, share: "CINEVAULT",
-                     rootPath: "Movies", username: "cinevault", password: password)
+                     rootPath: rootPath, username: "cinevault", password: password,
+                     ignoredFolders: ignoredFolders, ignoredFiles: ignoredFiles)
     }
 
     func testScanFindsNestedMoviesAndSkipsExtras() async throws {
@@ -85,9 +111,10 @@ final class SMBIntegrationTests: XCTestCase {
                                  rootPath: config.rootPath, username: config.username)
         source.id = config.id
         let staleMovie = Movie(filePath: movie.path, fileSize: 1, source: source)
-        let controller = try XCTUnwrap(PlaybackController(
+        let prepared = try await PlaybackController.prepare(
             movie: staleMovie, resume: false, services: PlaybackServices(), sourceConfig: { _ in config }
-        ))
+        )
+        let controller = try XCTUnwrap(prepared)
         let player = controller.player
         defer {
             controller.stop()

@@ -1,3 +1,4 @@
+import CineVaultCore
 import SwiftData
 import SwiftUI
 #if CINEVAULT_COMMERCIAL
@@ -20,7 +21,7 @@ struct SourcesView: View {
                             Text(source.name)
                             Text("smb://\(source.host)/\(source.share)/\(source.rootPath)")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text("\(source.movies.count) items · last scan \(source.lastScanDate?.formatted(date: .abbreviated, time: .shortened) ?? "never")")
+                            Text("\(source.movies.filter { !$0.isMissing }.count) items · last scan \(source.lastScanDate?.formatted(date: .abbreviated, time: .shortened) ?? "never")")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -53,6 +54,10 @@ struct SourceEditorView: View {
     @State private var port = ""
     @State private var share = ""
     @State private var rootPath = ""
+    @State private var ignoredFolders: [String] = []
+    @State private var ignoredFiles: [String] = []
+    @State private var exclusionsNotice: String?
+    @State private var loaded = false
     @State private var username = ""
     @State private var password = ""
     @State private var shares: [String] = []
@@ -65,7 +70,7 @@ struct SourceEditorView: View {
     private var config: SourceConfig {
         SourceConfig(id: source?.id ?? draftID, host: host.trimmingCharacters(in: .whitespaces), port: Int(port),
                      share: share, rootPath: rootPath.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")),
-                     username: username, password: password)
+                     username: username, password: password, ignoredFolders: ignoredFolders, ignoredFiles: ignoredFiles)
     }
 
     var body: some View {
@@ -73,20 +78,34 @@ struct SourceEditorView: View {
             Section { Button("Back") { dismiss() } }
             Section("Server") {
                 TextField("Name (e.g. Living Room NAS)", text: $name)
-                TextField("Host or IP (e.g. 192.168.1.20)", text: $host)
-                TextField("Port (optional, default 445)", text: $port).keyboardType(.numberPad)
+                TextField("Host or IP (e.g. 192.168.1.20)", text: Binding(get: { host }, set: { value in
+                    if host != value { clearExclusionsForChangedRoot() }; host = value
+                }))
+                TextField("Port (optional, default 445)", text: Binding(get: { port }, set: { value in
+                    if port != value { clearExclusionsForChangedRoot() }; port = value
+                })).keyboardType(.numberPad)
                 TextField("Username (empty for guest)", text: $username)
                 SecureField("Password", text: $password)
             }
             Section("Folder") {
-                TextField("Share (e.g. media)", text: $share)
+                TextField("Share (e.g. media)", text: Binding(get: { share }, set: { value in
+                    if share != value { clearExclusionsForChangedRoot() }; share = value
+                }))
                 if !shares.isEmpty {
-                    Picker("Pick a share", selection: $share) {
+                    Picker("Pick a share", selection: Binding(get: { share }, set: { value in
+                        if share != value { clearExclusionsForChangedRoot() }; share = value
+                    })) {
                         ForEach(shares, id: \.self) { Text($0).tag($0) }
                     }
                 }
-                TextField("Folder inside share (e.g. Movies)", text: $rootPath)
+                TextField("Folder inside share (e.g. Movies)", text: Binding(get: { rootPath }, set: setRootPath))
+                NavigationLink("Browse scan folders") {
+                    NASPathPicker(configuration: config, mode: .scanRoot) { path, _ in setRootPath(path) }
+                }.disabled(config.host.isEmpty || share.isEmpty || busy || credentialReadFailed)
+                if let exclusionsNotice { Text(exclusionsNotice).font(.caption).foregroundStyle(.secondary) }
             }
+            SourceExclusionsEditor(folders: $ignoredFolders, files: $ignoredFiles, configuration: config)
+                .disabled(busy || credentialReadFailed || deletedSourceID != nil)
             Section {
                 if let deletedSourceID {
                     Button("Retry Removing Stored Password") { removePassword(for: deletedSourceID) }
@@ -118,7 +137,21 @@ struct SourceEditorView: View {
             }
         }
         .navigationTitle(source == nil ? "Add NAS" : "Edit Source")
-        .onAppear(perform: load)
+        .onAppear {
+            if !loaded { load(); loaded = true }
+        }
+    }
+
+    private func clearExclusionsForChangedRoot() {
+        if !ignoredFolders.isEmpty || !ignoredFiles.isEmpty {
+            ignoredFolders = []; ignoredFiles = []
+            exclusionsNotice = "The scan folder changed. Previous ignored paths were cleared; choose them again for this folder."
+        }
+    }
+
+    private func setRootPath(_ value: String) {
+        if rootPath != value { clearExclusionsForChangedRoot() }
+        rootPath = value
     }
 
     private func load() {
@@ -128,6 +161,8 @@ struct SourceEditorView: View {
         port = source.port.map(String.init) ?? ""
         share = source.share
         rootPath = source.rootPath
+        ignoredFolders = source.ignoredFolders ?? []
+        ignoredFiles = source.ignoredFiles ?? []
         username = source.username
         do {
             password = try source.password()
@@ -149,6 +184,10 @@ struct SourceEditorView: View {
     private func save() {
         guard !scanner.isScanning, !busy, !credentialReadFailed else { return }
         let c = config
+        guard c.rootPath.isEmpty || ScanExclusions.normalizeFolder(path: c.rootPath) != nil else {
+            message = "Choose a folder within the share, or leave the scan folder empty for the share root."
+            return
+        }
         let target = source ?? MediaSource(name: "", host: "", share: "", rootPath: "", username: "")
         if source == nil { target.id = c.id }
         let oldPassword: String
@@ -159,7 +198,8 @@ struct SourceEditorView: View {
             message = "Could not save the password: \(error.localizedDescription)"
             return
         }
-        let oldValues = (target.name, target.host, target.port, target.share, target.rootPath, target.username)
+        let oldValues = (target.name, target.host, target.port, target.share, target.rootPath, target.username, target.ignoredFolders, target.ignoredFiles)
+        let oldMissingFlags = target.movies.map { ($0, $0.isMissing) }
         target.name = name.isEmpty ? c.host : name
         target.host = c.host
         target.port = c.port
@@ -168,12 +208,14 @@ struct SourceEditorView: View {
         target.username = c.username
         if source == nil { context.insert(target) }
         do {
+            try target.applyIgnoredPaths(folders: c.ignoredFolders, files: c.ignoredFiles)
             try context.save()
         } catch {
             if source == nil {
                 context.delete(target)
             } else {
-                (target.name, target.host, target.port, target.share, target.rootPath, target.username) = oldValues
+                (target.name, target.host, target.port, target.share, target.rootPath, target.username, target.ignoredFolders, target.ignoredFiles) = oldValues
+                for (movie, missing) in oldMissingFlags { movie.isMissing = missing }
             }
             do {
                 try target.setPassword(oldPassword)

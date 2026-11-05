@@ -7,7 +7,9 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.ext.SdkExtensions
+import com.dineshdevkota.cinevault.core.DiscoveryTiming
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.channels.awaitClose
@@ -48,19 +50,21 @@ private class Search(
     private val emit: (NasDiscoveryState) -> Unit,
     private val close: () -> Unit,
 ) {
-    private class Advertisement(val key: String, val info: NsdServiceInfo)
+    private class Advertisement(val key: String, val info: NsdServiceInfo, var attempts: Int = 0)
     private val handler = Handler(Looper.getMainLooper())
     private val cancelled = AtomicBoolean(false)
     // All fields below are confined to the main handler, including NSD callbacks.
     private val present = linkedMapOf<String, Advertisement>()
     private val pending = ArrayDeque<Advertisement>()
+    private val retrying = mutableSetOf<Advertisement>()
     private val devices = linkedMapOf<String, DiscoveredNas>()
     private var resolving: NsdManager.ResolveListener? = null
     private var registered = false
     private var finished = false
     private var stopAttempts = 0
     private var multicastLock: WifiManager.MulticastLock? = null
-    private val deadline = Runnable { finish() }
+    private var timing = DiscoveryTiming(SystemClock.elapsedRealtime())
+    private val deadline = Runnable { checkDeadline() }
 
     private fun dispatch(block: () -> Unit) {
         handler.post { if (!finished && !cancelled.get()) block() }
@@ -79,21 +83,26 @@ private class Search(
     }
 
     private val listener = object : NsdManager.DiscoveryListener {
-        override fun onDiscoveryStarted(serviceType: String) = Unit
+        override fun onDiscoveryStarted(serviceType: String) = dispatch {
+            timing.started(SystemClock.elapsedRealtime())
+            checkDeadline()
+        }
         override fun onServiceFound(info: NsdServiceInfo) = dispatch {
-            if (info.serviceType.trimEnd('.') != "_smb._tcp") return@dispatch
+            if (!info.serviceType.trimEnd('.').equals("_smb._tcp", ignoreCase = true)) return@dispatch
             val id = key(info)
             if (present.containsKey(id)) return@dispatch
             val advertisement = Advertisement(id, info)
             present[id] = advertisement
             pending.addLast(advertisement)
             resolveNext()
+            checkDeadline()
         }
         override fun onServiceLost(info: NsdServiceInfo) = dispatch {
             val id = key(info)
             present.remove(id)
             devices.remove(id)
             publish()
+            checkDeadline()
         }
         override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) = dispatch {
             registered = false
@@ -112,8 +121,9 @@ private class Search(
     }
 
     fun start() = dispatch {
+        timing = DiscoveryTiming(SystemClock.elapsedRealtime())
         publish()
-        handler.postDelayed(deadline, 10_000L)
+        checkDeadline()
         try {
             acquireMulticastLockIfNeeded()
             registered = true
@@ -155,11 +165,14 @@ private class Search(
         var next = pending.removeFirstOrNull()
         while (next != null && present[next.key] !== next) next = pending.removeFirstOrNull()
         val advertisement = next ?: return
+        advertisement.attempts++
         val callback = object : NsdManager.ResolveListener {
             override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) = dispatch {
                 if (resolving !== this) return@dispatch
                 resolving = null
+                retry(advertisement)
                 resolveNext()
+                checkDeadline()
             }
             override fun onServiceResolved(info: NsdServiceInfo) = dispatch {
                 if (resolving !== this) return@dispatch
@@ -170,8 +183,9 @@ private class Search(
                     !host.isNullOrBlank() && info.port in 1..65535) {
                     devices[advertisement.key] = DiscoveredNas(info.serviceName, host, info.port)
                     publish()
-                }
+                } else retry(advertisement)
                 resolveNext()
+                checkDeadline()
             }
         }
         resolving = callback
@@ -179,8 +193,38 @@ private class Search(
             manager.resolveService(advertisement.info, callback)
         } catch (_: RuntimeException) {
             resolving = null
-            handler.post { if (!finished && !cancelled.get()) resolveNext() }
+            retry(advertisement)
+            handler.post {
+                if (!finished && !cancelled.get()) { resolveNext(); checkDeadline() }
+            }
         }
+    }
+
+    private fun retry(advertisement: Advertisement) {
+        if (advertisement.attempts >= 2 || present[advertisement.key] !== advertisement) return
+        retrying.add(advertisement)
+        handler.postDelayed({
+            retrying.remove(advertisement)
+            if (!finished && !cancelled.get()) {
+                if (present[advertisement.key] === advertisement) pending.addLast(advertisement)
+                resolveNext()
+                checkDeadline()
+            }
+        }, 500L)
+    }
+
+    private fun checkDeadline() {
+        if (finished || cancelled.get()) return
+        handler.removeCallbacks(deadline)
+        val hasPending = resolving != null || retrying.isNotEmpty() || pending.any { present[it.key] === it }
+        val remaining = timing.remaining(SystemClock.elapsedRealtime(), hasPending)
+        if (remaining > 0) handler.postDelayed(deadline, remaining)
+        else finish(when {
+            !timing.hasStarted -> "Network discovery did not start. Check your connection and try again."
+            devices.isEmpty() && present.isNotEmpty() ->
+                "A NAS was found, but its address could not be resolved. Try again or enter its address."
+            else -> null
+        })
     }
 
     private fun stopDiscovery() {
@@ -205,6 +249,7 @@ private class Search(
         // Earlier Android versions cannot cancel resolution; its callbacks are ignored.
         resolving = null
         pending.clear()
+        retrying.clear()
         present.clear()
         if (!cancelled.get()) publish(searching = false, error = error)
         close()

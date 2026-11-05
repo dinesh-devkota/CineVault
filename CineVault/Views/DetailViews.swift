@@ -16,6 +16,10 @@ struct MovieDetailView: View {
     @State private var credentialUnavailable = false
     @State private var credentialMessage = ""
     @State private var watchlistError: String?
+    @State private var isPreparing = false
+    @State private var preparationTask: Task<Void, Never>?
+    @State private var preparationID = UUID()
+    @State private var loadingError: String?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -89,10 +93,11 @@ struct MovieDetailView: View {
                 .ignoresSafeArea()
                 .onDisappear { controller.stop() }
         }
+        .onDisappear { cancelPreparation() }
         .alert("Format not supported", isPresented: $unsupported) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Apple TV's built-in player can't play .\((movie.fileName as NSString).pathExtension) files. Remux it to MP4 (e.g. with ffmpeg -c copy) on your NAS and rescan.")
+            Text(PlaybackPreparationError.unsupportedFormat.localizedDescription)
         }
         .alert("Source unavailable", isPresented: $missingSource) {
             Button("OK", role: .cancel) {}
@@ -104,11 +109,22 @@ struct MovieDetailView: View {
         } message: {
             Text(credentialMessage)
         }
+        .alert("Unable to load media", isPresented: Binding(get: { loadingError != nil }, set: { if !$0 { loadingError = nil } })) {
+            Button("OK", role: .cancel) { loadingError = nil }
+        } message: { Text(loadingError ?? "The file could not be loaded.") }
     }
 
     private var playbackControls: some View {
         HStack(spacing: 24) {
-            if playbackServices.canResume(movie) {
+            if movie.isMissing || movie.source?.isIgnored(filePath: movie.filePath) == true {
+                Text("File unavailable. Include it again and rescan before playing.")
+                    .font(.callout).foregroundStyle(CinemaTheme.secondaryText)
+            } else if !PlaybackController.isNativeCandidate(movie) {
+                Button("Format information") { unsupported = true }.buttonStyle(.bordered)
+            } else if isPreparing {
+                ProgressView("Checking media…")
+                Button("Cancel loading") { cancelPreparation() }.buttonStyle(.bordered)
+            } else if playbackServices.canResume(movie) {
                 Button { play(resume: true) } label: {
                     Label("Resume \(format(playbackServices.resumePosition(movie)))", systemImage: "play.fill")
                 }
@@ -201,20 +217,51 @@ struct MovieDetailView: View {
     }
 
     private func play(resume: Bool) {
-        guard MediaFile.isPlayable(path: movie.filePath) else {
+        guard PlaybackController.isNativeCandidate(movie) else {
             unsupported = true
             return
         }
-        do {
-            guard let controller = try PlaybackController(movie: movie, resume: resume, services: playbackServices) else {
-                missingSource = true
-                return
+        cancelPreparation()
+        let token = preparationID
+        isPreparing = true
+        loadingError = nil
+        preparationTask = Task { @MainActor in
+            defer {
+                if preparationID == token { isPreparing = false; preparationTask = nil }
             }
-            playback = controller
-        } catch {
-            credentialMessage = error.localizedDescription
-            credentialUnavailable = true
+            do {
+                guard let controller = try await PlaybackController.prepare(movie: movie, resume: resume, services: playbackServices) else {
+                    if preparationID == token && !Task.isCancelled { missingSource = true }
+                    return
+                }
+                guard preparationID == token, !Task.isCancelled else { controller.stop(saveProgress: false); return }
+                playback = controller
+            } catch is CancellationError {
+                // Leaving the detail view or a replacement request owns the UI now.
+            } catch let error as CredentialError {
+                if preparationID == token && !Task.isCancelled {
+                    credentialMessage = error.localizedDescription; credentialUnavailable = true
+                }
+            } catch let error as PlaybackPreparationError {
+                if preparationID == token && !Task.isCancelled {
+                    switch error {
+                    case .unsupportedFormat: unsupported = true
+                    case .fileUnavailable: loadingError = error.localizedDescription
+                    }
+                }
+            } catch {
+                if preparationID == token && !Task.isCancelled {
+                    loadingError = "Could not read or prepare this file. Check the NAS connection and the file. \(error.localizedDescription)"
+                }
+            }
         }
+    }
+
+    private func cancelPreparation() {
+        preparationID = UUID()
+        preparationTask?.cancel()
+        preparationTask = nil
+        isPreparing = false
     }
 }
 

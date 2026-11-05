@@ -54,7 +54,7 @@ class WatchlistMigrationTest {
         assertEquals(legacy.movie, movie)
         assertEquals("fixture-only", source.config(SecretBox()).password)
         assertFalse("Existing movies must start outside the watchlist", movie.isWatchlisted)
-        assertEquals(3, db.openHelper.readableDatabase.version)
+        assertEquals(4, db.openHelper.readableDatabase.version)
     }
 
     @Test
@@ -69,7 +69,7 @@ class WatchlistMigrationTest {
         val movie = requireNotNull(db.movies().get(legacy.movie.id))
         assertEquals(legacy.movie.copy(isWatchlisted = true), movie)
         assertEquals(legacy.source, db.sources().get(legacy.source.id))
-        assertEquals(3, db.openHelper.readableDatabase.version)
+        assertEquals(4, db.openHelper.readableDatabase.version)
         db.movies().applyTVMetadata(movie.id, "Example", 42, 0, 1, "/season.jpg", "Episode", 40, 8.0,
             "/series.jpg", "/backdrop.jpg", "[\"Drama\"]")
         val updated = requireNotNull(db.movies().get(movie.id))
@@ -79,6 +79,31 @@ class WatchlistMigrationTest {
         assertEquals(movie.isWatched, updated.isWatched)
         assertEquals(movie.isWatchlisted, updated.isWatchlisted)
         assertEquals(movie.isLocked, updated.isLocked)
+    }
+
+    @Test
+    fun versionThreeUpgradeAddsEmptyExclusionsAndPersistsRulesWithoutLosingHistory() = runBlocking {
+        val legacy = createVersionOneDatabase()
+        SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).path, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("ALTER TABLE movies ADD COLUMN isWatchlisted INTEGER NOT NULL DEFAULT 0")
+            it.execSQL("ALTER TABLE movies ADD COLUMN seriesTitle TEXT")
+            it.execSQL("ALTER TABLE movies ADD COLUMN seriesTmdbId INTEGER")
+            it.execSQL("ALTER TABLE movies ADD COLUMN seasonNumber INTEGER")
+            it.execSQL("ALTER TABLE movies ADD COLUMN episodeNumber INTEGER")
+            it.execSQL("ALTER TABLE movies ADD COLUMN seasonPosterPath TEXT")
+            it.version = 3
+        }
+        var db = openDatabase()
+        assertEquals(4, db.openHelper.readableDatabase.version)
+        assertEquals(legacy.source, db.sources().get(legacy.source.id))
+        assertEquals(legacy.movie, db.movies().get(legacy.movie.id))
+        val changed = legacy.source.copy(ignoredFolders = listOf("Unwanted/子供"), ignoredFiles = listOf("Trailer.mp4"))
+        db.saveSourceWithExclusions(changed)
+        db = openDatabase()
+        assertEquals(changed, db.sources().get(changed.id))
+        assertEquals(legacy.movie, db.movies().get(legacy.movie.id))
+        assertEquals(changed.ignoredFolders, db.sources().get(changed.id)!!.config(SecretBox()).ignoredFolders)
+        assertEquals(changed.ignoredFiles, db.sources().get(changed.id)!!.config(SecretBox()).ignoredFiles)
     }
 
     @Test

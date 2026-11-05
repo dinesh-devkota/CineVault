@@ -32,6 +32,9 @@ data class SourceEntity(
     val username: String = "",
     val encryptedPassword: String = "",
     val lastScanAt: Long? = null,
+    /** Literal folder paths relative to rootPath; excluded rows retain their history. */
+    @ColumnInfo(defaultValue = "'[]'") val ignoredFolders: List<String> = emptyList(),
+    @ColumnInfo(defaultValue = "'[]'") val ignoredFiles: List<String> = emptyList(),
 ) {
     fun config(secrets: SecretBox): SourceConfig = SourceConfig(
         id = id,
@@ -41,6 +44,8 @@ data class SourceEntity(
         rootPath = rootPath,
         username = username,
         password = if (username.isEmpty()) "" else secrets.decrypt(encryptedPassword),
+        ignoredFolders = ignoredFolders,
+        ignoredFiles = ignoredFiles,
     )
 }
 

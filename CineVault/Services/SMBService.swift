@@ -7,6 +7,12 @@ struct RemoteFile: Sendable {
     let size: Int64
 }
 
+struct NASDirectoryEntry: Sendable, Identifiable {
+    let name: String
+    let isDirectory: Bool
+    var id: String { name }
+}
+
 struct ScanProgress: Sendable {
     let files: [RemoteFile]
     let found: Int
@@ -147,6 +153,21 @@ actor SMBService {
         }
     }
 
+    /// Read-only entries for the source folder and exclusion pickers.
+    func listEntries(_ config: SourceConfig) async throws -> [NASDirectoryEntry] {
+        try await withManager(config) { manager in
+            let entries = try await manager.contentsOfDirectory(atPath: config.rootPath)
+            return entries.compactMap { entry -> NASDirectoryEntry? in
+                guard let name = entry[.nameKey] as? String, !name.isEmpty, name != ".", name != "..",
+                      !name.contains("/"), !name.contains("\\") else { return nil }
+                return NASDirectoryEntry(name: name, isDirectory: (entry[.isDirectoryKey] as? Bool) == true)
+            }.sorted {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+        }
+    }
+
     /// Recursively lists indexable video files below the source's root folder.
     func scanVideos(_ config: SourceConfig) async throws -> [RemoteFile] {
         try await withManager(config) { manager in
@@ -154,15 +175,22 @@ actor SMBService {
             var pending = [config.rootPath]
             while let dir = pending.popLast() {
                 try Task.checkCancellation()
+                if config.excludesDirectory(dir) { continue }
                 let entries = try await manager.contentsOfDirectory(atPath: dir)
                 for entry in entries {
                     guard let name = entry[.nameKey] as? String else { continue }
                     let path = (entry[.pathKey] as? String) ?? (dir as NSString).appendingPathComponent(name)
                     if (entry[.isDirectoryKey] as? Bool) == true {
-                        if !VideoFile.shouldSkipDirectory(name: name) { pending.append(path) }
+                        if !VideoFile.shouldSkipDirectory(name: name), !MediaFile.shouldSkipDirectory(name: name),
+                           !config.excludesDirectory(path) { pending.append(path) }
                     } else {
                         let size = (entry[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
-                        if VideoFile.shouldIndex(path: path, size: size) {
+                        if !config.excludesFile(path), MediaFile.shouldIndex(path: path, size: size),
+                           VideoFile.shouldIndex(path: path, size: size) {
+                            if MediaFile.requiresContentCheck(path: path) {
+                                let prefix = try await manager.contents(atPath: path, range: 0..<UInt64(min(size, 1024)), progress: nil)
+                                guard MediaFile.isTransportStream(prefix: prefix) else { continue }
+                            }
                             results.append(RemoteFile(path: path, size: size))
                         }
                     }
@@ -180,6 +208,7 @@ actor SMBService {
             var folders = 0
             while let dir = pending.popLast() {
                 try Task.checkCancellation()
+                if config.excludesDirectory(dir) { continue }
                 let entries = try await manager.contentsOfDirectory(atPath: dir)
                 var batch: [RemoteFile] = []
                 for entry in entries {
@@ -187,10 +216,14 @@ actor SMBService {
                     guard let name = entry[.nameKey] as? String, name != ".", name != ".." else { continue }
                     let path = (entry[.pathKey] as? String) ?? (dir as NSString).appendingPathComponent(name)
                     if (entry[.isDirectoryKey] as? Bool) == true {
-                        if !MediaFile.shouldSkipDirectory(name: name) { pending.append(path) }
+                        if !MediaFile.shouldSkipDirectory(name: name), !config.excludesDirectory(path) { pending.append(path) }
                     } else {
                         let size = (entry[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
-                        if MediaFile.shouldIndex(path: path, size: size) {
+                        if !config.excludesFile(path), MediaFile.shouldIndex(path: path, size: size) {
+                            if MediaFile.requiresContentCheck(path: path) {
+                                let prefix = try await manager.contents(atPath: path, range: 0..<UInt64(min(size, 1024)), progress: nil)
+                                guard MediaFile.isTransportStream(prefix: prefix) else { continue }
+                            }
                             let file = RemoteFile(path: path, size: size)
                             results.append(file); batch.append(file)
                             if batch.count >= 100 {

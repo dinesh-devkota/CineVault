@@ -20,6 +20,7 @@ import androidx.annotation.OptIn
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.room.withTransaction
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -131,22 +132,27 @@ class PlayerActivity : ComponentActivity() {
             if (playerView.isControllerFullyVisible && player?.playerError == null) playerView.hideController() else finish()
         }
         lifecycleScope.launch {
-            val loaded = try {
-                load(movieId)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Toast.makeText(this@PlayerActivity, SmbService.describe(e), Toast.LENGTH_LONG).show()
-                finish()
-                return@launch
-            }
-            if (startPositionMs == C.TIME_UNSET) startPositionMs = if (resume) loaded.movie.playbackPositionMs else 0
-            target = loaded
-            showInformation(loaded.movie)
-            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) startPlayer()
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                val loaded = try {
+                    load(movieId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Toast.makeText(this@PlayerActivity, SmbService.describe(e), Toast.LENGTH_LONG).show()
+                    finish()
+                    return@repeatOnLifecycle
+                }
+                if (startPositionMs == C.TIME_UNSET) startPositionMs = if (resume) loaded.movie.playbackPositionMs else 0
+                target = loaded
+                showInformation(loaded.movie)
+                startPlayer()
                 container.database.movies().observe(movieId).collect { current ->
-                    if (current != null) showInformation(current)
+                    if (current == null || PlaybackValidator.rejectionReason(current, loaded.config) != null) {
+                        stopPlayer()
+                        target = null
+                        Toast.makeText(this@PlayerActivity, "This item is no longer available for playback.", Toast.LENGTH_LONG).show()
+                        finish()
+                    } else showInformation(current)
                 }
             }
         }
@@ -156,19 +162,29 @@ class PlayerActivity : ComponentActivity() {
         val database = container.database
         val movie = container.playbackProgress.await { database.movies().get(movieId) }
             ?: throw SmbException("This movie is no longer in the library.")
+        PlaybackValidator.rejectionReason(movie)?.let { throw SmbException(it) }
         val source = database.sources().get(movie.sourceId) ?: throw SmbException("This movie's NAS source was removed.")
         val config = withContext(Dispatchers.Default) { source.config(container.secrets) }
-        return Target(movie, config)
-    }
-
-    override fun onStart() {
-        super.onStart()
-        startPlayer()
+        PlaybackValidator.validate(movie, config, container.smb::hasPlayableContent)
+        // A source edit or ignore action can complete while the NAS header read is suspended.
+        return database.withTransaction {
+            val currentSource = database.sources().get(source.id)
+            if (currentSource?.copy(name = source.name, lastScanAt = source.lastScanAt) != source) {
+                throw SmbException("The NAS source changed. Reopen this item to play it.")
+            }
+            val current = database.movies().get(movieId) ?: throw SmbException("This item was removed from the library.")
+            if (current.filePath != movie.filePath || current.sourceId != movie.sourceId) {
+                throw SmbException("This item's source changed. Reopen it to play.")
+            }
+            PlaybackValidator.rejectionReason(current, config)?.let { throw SmbException(it) }
+            Target(current, config)
+        }
     }
 
     override fun onStop() {
         super.onStop()
         stopPlayer()
+        target = null
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

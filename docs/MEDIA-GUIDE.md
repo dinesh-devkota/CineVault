@@ -18,6 +18,33 @@ A source pointing to `Media/Movies` finds only that folder and its descendants.
 It cannot find sibling `Music` or `TV Shows` folders. Edit the source to use the
 common `Media` parent, then scan again.
 
+## Choose what to scan or ignore
+
+Open **Sources → Edit** for the NAS. Use **Choose scan folder** to browse the
+share, open subfolders, and select **Use this folder** or the share root.
+
+Under **Ignored folders and files**, open the folder/file picker. Choose
+**Ignore folder** to exclude that folder and all its descendants, or **Ignore
+file** to exclude only that file. You can also enter a relative path manually.
+For example, if the selected scan folder is `Media`, use `Projects` or
+`Movies/Extras/trailer.mp4`, without the NAS address or `Media` prefix.
+
+Choose **Save & Scan** to apply the rules. Already indexed excluded items
+disappear from this source's library immediately; the NAS files and their saved
+playback history are kept. To restore an item, choose **Include again** (or
+**Stop ignoring** on Apple TV), save, and let the scan finish. Rules apply only
+to that NAS source. If another source scans the same files, set its rules too.
+
+Changing the NAS address, port, share, or scan folder clears its relative
+exclusions so they do not apply to unrelated folders. Select the exclusions
+again for the new location.
+
+Software dependency folders such as `node_modules` and TypeScript declaration
+files (`.d.ts`) are skipped automatically. Other `.ts` files are checked for
+MPEG transport-stream content before being added, because `.ts` can also mean
+TypeScript source code. Rescan an existing source to clear previously imported
+code files from the library.
+
 ## Use clear names
 
 For example:
@@ -70,7 +97,34 @@ before completion; they do not mean every folder has finished. Check the status
 and the last successful scan time. If a scan fails, correct the connection or
 credentials and retry.
 
-Cine-Media does not transcode. Video playback on Apple TV supports MP4, M4V, and
-MOV; Android supports additional containers, including MKV. Audio/video codec
-support still depends on the device. A file appearing in the library does not
-guarantee it can play on every platform.
+Cine-Media does not transcode. A filename extension identifies a candidate
+format; the file must contain real media, and the device must support the
+audio/video codecs inside it. Unsupported formats show an explanation instead
+of Play controls. Apple TV also checks the actual asset before starting playback.
+
+| Platform | Video candidates | Audio candidates |
+| --- | --- | --- |
+| Android TV | MP4, M4V, MOV, MKV, WebM, AVI, MPEG-TS, MPEG-PS, FLV | MP3, M4A, AAC, FLAC, WAV, Ogg, Opus |
+| Apple TV | MP4, M4V, MOV | MP3, M4A, AAC, FLAC, WAV, AIFF/AIF |
+
+This table describes the current app's file playback, not every format supported
+by other players. Android's AVI support depends on its extractor and device
+codecs; FLV seeking is limited. WMV, ISO, and M2TS are cataloged but cannot be
+played by these built-in players. WMA cannot play on either platform, and AIFF/AIF
+cannot play in this Android build. Unsupported real media can remain in the
+library for organization.
+
+The `.ts` suffix is shared by MPEG transport-stream video and TypeScript source
+code. `.d.ts` is a TypeScript declaration file and is never media. Scanning checks
+the packet structure of ambiguous `.ts` files; Android repeats that check before
+playing an existing entry. Android's TS player requires standard 188-byte packets;
+192-byte M2TS and 204-byte variants are not enabled for playback. The player then
+checks whether it can decode its tracks.
+Standalone TS files are not enabled for playback in the current Apple TV app.
+
+Format references: [Android Media3 progressive formats](https://developer.android.com/media/media3/exoplayer/progressive),
+[Media3 codec support](https://developer.android.com/media/media3/exoplayer/supported-formats),
+[the app's Media3 1.8.0 extractors](https://github.com/androidx/media/blob/1.8.0/libraries/extractor/src/main/java/androidx/media3/extractor/DefaultExtractorsFactory.java),
+[its TS packet parser](https://github.com/androidx/media/blob/1.8.0/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java),
+[Apple asset playability](https://developer.apple.com/documentation/avfoundation/avasset/isplayable),
+and [TypeScript declaration files](https://www.typescriptlang.org/docs/handbook/2/type-declarations.html).

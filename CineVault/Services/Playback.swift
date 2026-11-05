@@ -111,26 +111,88 @@ final class SMBResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
 }
 
 /// Owns the AVPlayer for one movie and persists resume position / watched state.
+enum PlaybackPreparationError: LocalizedError {
+    case unsupportedFormat
+    case fileUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedFormat:
+            return "Apple TV's native player cannot play this file's container or audio/video codecs. Use a supported container with compatible codecs."
+        case .fileUnavailable:
+            return "This file is missing or ignored by its NAS source. Include it again and rescan before playing."
+        }
+    }
+}
+
 @MainActor
 final class PlaybackController: ObservableObject {
     let player: AVPlayer
+    @Published private(set) var playbackError: String?
     #if CINEVAULT_COMMERCIAL
     let commercialSession: CommercialPlaybackSession
     #endif
     private let loader: SMBResourceLoader
+    private let asset: AVURLAsset
     private let movie: Movie
     private var finishedPlayback = false
     private var stopped = false
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var artworkTask: Task<Void, Never>?
+    private var itemObservation: NSKeyValueObservation?
 
-    init?(movie: Movie, resume: Bool, services: PlaybackServices,
-          sourceConfig: (MediaSource) throws -> SourceConfig = { try $0.config() }) throws {
+    static func isNativeCandidate(_ movie: Movie) -> Bool {
+        MediaFile.isPlayable(path: movie.filePath)
+    }
+
+    private static func playbackSource(for movie: Movie) throws -> MediaSource? {
+        guard isNativeCandidate(movie) else { throw PlaybackPreparationError.unsupportedFormat }
         guard let source = movie.source else { return nil }
+        guard !movie.isMissing, !source.isIgnored(filePath: movie.filePath) else { throw PlaybackPreparationError.fileUnavailable }
+        return source
+    }
+
+    /// Check the actual asset before creating a player or changing playback history.
+    static func prepare(movie: Movie, resume: Bool, services: PlaybackServices,
+                        sourceConfig: (MediaSource) throws -> SourceConfig = { try $0.config() },
+                        loadPlayable: (AVURLAsset) async throws -> Bool = { try await $0.load(.isPlayable) }) async throws -> PlaybackController? {
+        guard let source = try playbackSource(for: movie) else { return nil }
+        let config = try sourceConfig(source)
+        let path = movie.filePath
+        let loader = SMBResourceLoader(config: config, path: path)
+        let asset = loader.makeAsset()
+        return try await withTaskCancellationHandler {
+            do {
+                let playable = try await loadPlayable(asset)
+                try Task.checkCancellation()
+                guard playable else { throw PlaybackPreparationError.unsupportedFormat }
+                guard let currentSource = try playbackSource(for: movie), currentSource === source,
+                      movie.filePath == path, try sourceConfig(currentSource) == config else {
+                    throw PlaybackPreparationError.fileUnavailable
+                }
+                return PlaybackController(movie: movie, resume: resume, services: services, loader: loader, asset: asset)
+            } catch {
+                asset.cancelLoading()
+                throw error
+            }
+        } onCancel: {
+            asset.cancelLoading()
+        }
+    }
+
+    convenience init?(movie: Movie, resume: Bool, services: PlaybackServices,
+          sourceConfig: (MediaSource) throws -> SourceConfig = { try $0.config() }) throws {
+        guard let source = try Self.playbackSource(for: movie) else { return nil }
+        let loader = SMBResourceLoader(config: try sourceConfig(source), path: movie.filePath)
+        self.init(movie: movie, resume: resume, services: services, loader: loader, asset: loader.makeAsset())
+    }
+
+    private init(movie: Movie, resume: Bool, services: PlaybackServices, loader: SMBResourceLoader, asset: AVURLAsset) {
         self.movie = movie
-        loader = SMBResourceLoader(config: try sourceConfig(source), path: movie.filePath)
-        let item = AVPlayerItem(asset: loader.makeAsset())
+        self.loader = loader
+        self.asset = asset
+        let item = AVPlayerItem(asset: asset)
         item.externalMetadata = Self.metadata(for: movie)
         let player = AVPlayer(playerItem: item)
         self.player = player
@@ -144,6 +206,15 @@ final class PlaybackController: ObservableObject {
             player.seek(to: CMTime(seconds: movie.playbackPosition, preferredTimescale: 600))
         }
         #endif
+        itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            let message = item.error?.localizedDescription ?? "The native player could not decode this file."
+            Task { @MainActor [weak self] in
+                guard let self, !self.stopped else { return }
+                self.playbackError = "Playback could not continue. Check the NAS connection and the file's codecs. \(message)"
+                self.player.pause()
+            }
+        }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 10, preferredTimescale: 1), queue: .main) { [weak self] time in
             MainActor.assumeIsolated { self?.record(time: time.seconds) }
         }
@@ -221,29 +292,33 @@ final class PlaybackController: ObservableObject {
         movie.lastPlayedAt = Date()
     }
 
-    func stop() {
+    func stop(saveProgress: Bool = true) {
         guard !stopped else { return }
         #if CINEVAULT_COMMERCIAL
         commercialSession.stop()
         #endif
-        record(time: player.currentTime().seconds)
+        if saveProgress { record(time: player.currentTime().seconds) }
         stopped = true
         artworkTask?.cancel()
         artworkTask = nil
         player.pause()
+        asset.cancelLoading()
+        itemObservation?.invalidate()
+        itemObservation = nil
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         timeObserver = nil
         endObserver = nil
-        try? movie.modelContext?.save()
+        if saveProgress { try? movie.modelContext?.save() }
     }
 }
 
 struct PlaybackScreen: View {
-    let controller: PlaybackController
+    @ObservedObject var controller: PlaybackController
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        Group {
         #if CINEVAULT_COMMERCIAL
         CommercialPlayerView(session: controller.commercialSession)
             .overlay(alignment: .topLeading) {
@@ -253,6 +328,10 @@ struct PlaybackScreen: View {
         #else
         PlayerView(controller: controller)
         #endif
+        }
+        .alert("Playback unavailable", isPresented: Binding(get: { controller.playbackError != nil }, set: { _ in })) {
+            Button("Back") { controller.stop(); dismiss() }
+        } message: { Text(controller.playbackError ?? "This file could not be played.") }
     }
 }
 

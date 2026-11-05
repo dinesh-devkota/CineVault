@@ -23,6 +23,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.data.SourceEntity
+import com.dineshdevkota.cinevault.data.saveSourceWithExclusions
 import com.dineshdevkota.cinevault.smb.*
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -61,6 +62,9 @@ private fun NasSetupScreen(onDone: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var share by remember { mutableStateOf("") }
     var rootPath by remember { mutableStateOf("") }
+    var ignoredFolders by remember { mutableStateOf(emptyList<String>()) }
+    var ignoredFiles by remember { mutableStateOf(emptyList<String>()) }
+    var exclusionsNotice by remember { mutableStateOf<String?>(null) }
     var discovery by remember { mutableStateOf(NasDiscoveryState(searching = true)) }
     var refresh by remember { mutableIntStateOf(0) }
     var shares by remember { mutableStateOf(emptyList<NasShare>()) }
@@ -72,6 +76,13 @@ private fun NasSetupScreen(onDone: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     var requestJob by remember { mutableStateOf<Job?>(null) }
+
+    fun clearExclusionsForSourceChange() {
+        if (ignoredFolders.isNotEmpty() || ignoredFiles.isNotEmpty()) {
+            ignoredFolders = emptyList(); ignoredFiles = emptyList()
+            exclusionsNotice = "NAS connection or media folder changed. Previous ignore rules were cleared."
+        }
+    }
 
     fun invalidate() {
         generation++
@@ -94,7 +105,7 @@ private fun NasSetupScreen(onDone: () -> Unit) {
         }
         if (error != null) return null
         return SourceConfig(sourceId, SmbService.normalizedHost(host), parsedPort, share.trim(),
-            rootPath.replace('\\', '/').trim('/'), username.trim(), password)
+            rootPath.replace('\\', '/').trim('/'), username.trim(), password, ignoredFolders, ignoredFiles)
     }
 
     fun request(action: suspend (Int) -> Unit) {
@@ -123,6 +134,7 @@ private fun NasSetupScreen(onDone: () -> Unit) {
     fun loadShares() {
         val source = config() ?: return
         invalidate()
+        clearExclusionsForSourceChange()
         share = ""
         rootPath = ""
         request { token ->
@@ -136,6 +148,7 @@ private fun NasSetupScreen(onDone: () -> Unit) {
     }
 
     fun browse(selectedShare: String, path: String) {
+        if (path != rootPath || selectedShare != share) clearExclusionsForSourceChange()
         share = selectedShare
         rootPath = path
         folders = emptyList()
@@ -188,6 +201,7 @@ private fun NasSetupScreen(onDone: () -> Unit) {
                 if (busy) Text("Connecting…", color = SecondaryText)
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            exclusionsNotice?.let { Text(it, color = SecondaryText) }
         }
         when (step) {
             SetupStep.Devices -> {
@@ -201,6 +215,7 @@ private fun NasSetupScreen(onDone: () -> Unit) {
                 items(discovery.devices, key = { "${it.host}:${it.port}" }) { device ->
                     Button(onClick = {
                         invalidate()
+                        if (host != device.host || port != device.port.toString()) clearExclusionsForSourceChange()
                         name = device.name; host = device.host; port = device.port.toString()
                         username = ""; password = ""; credentials = false; manualShare = false
                         step = SetupStep.Connect
@@ -210,17 +225,19 @@ private fun NasSetupScreen(onDone: () -> Unit) {
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(onClick = { step = SetupStep.Connect }) { Text("Enter NAS address") }
-                        OutlinedButton(onClick = { refresh++ }) { Text("Search again") }
+                        OutlinedButton(enabled = !discovery.searching, onClick = { refresh++ }) {
+                            Text(if (discovery.searching) "Searching…" else "Search again")
+                        }
                     }
                 }
             }
             SetupStep.Connect -> {
                 item {
-                    TvTextField(host, { invalidate(); host = it; username = ""; password = ""; share = ""; rootPath = "" },
+                    TvTextField(host, { invalidate(); clearExclusionsForSourceChange(); host = it; username = ""; password = ""; share = ""; rootPath = "" },
                         "NAS address", Modifier.fillMaxWidth(), enabled = !busy)
                 }
                 item {
-                    TvTextField(port, { invalidate(); port = it }, "Port", keyboardType = KeyboardType.Number, enabled = !busy)
+                    TvTextField(port, { invalidate(); if (port != it) clearExclusionsForSourceChange(); port = it }, "Port", keyboardType = KeyboardType.Number, enabled = !busy)
                 }
                 if (credentials) {
                     item { Text("Sign in with your NAS account. Leave both fields blank for guest access.", color = SecondaryText) }
@@ -236,7 +253,7 @@ private fun NasSetupScreen(onDone: () -> Unit) {
                 }
                 if (manualShare) {
                     item { Text("If your NAS restricts browsing, enter a share you can access.", color = SecondaryText) }
-                    item { TvTextField(share, { invalidate(); share = it; rootPath = "" }, "Share name", enabled = !busy) }
+                    item { TvTextField(share, { invalidate(); if (share != it || rootPath.isNotEmpty()) clearExclusionsForSourceChange(); share = it; rootPath = "" }, "Share name", enabled = !busy) }
                     item { Button(onClick = { browse(share, "") }, enabled = !busy) { Text("Open share") } }
                 }
             }
@@ -266,10 +283,11 @@ private fun NasSetupScreen(onDone: () -> Unit) {
                                 if (generation != token) return@request
                                 val encrypted = withContext(Dispatchers.Default) { container.secrets.encrypt(source.password) }
                                 if (generation != token) return@request
-                                container.database.sources().upsert(SourceEntity(
+                                container.database.saveSourceWithExclusions(SourceEntity(
                                     id = sourceId, name = savedName, host = source.host, port = source.port,
                                     share = source.share, rootPath = source.rootPath, username = source.username,
                                     encryptedPassword = encrypted,
+                                    ignoredFolders = source.ignoredFolders, ignoredFiles = source.ignoredFiles,
                                 ))
                                 if (generation == token) {
                                     container.scope.launch { container.scanner.scan(sourceId) }
@@ -284,6 +302,10 @@ private fun NasSetupScreen(onDone: () -> Unit) {
                     OutlinedButton(onClick = { browse(share, listOf(rootPath, folder).filter(String::isNotBlank).joinToString("/")) }, enabled = !busy) { Text(folder) }
                 }
                 if (folderReady && folders.isEmpty()) item { Text("No subfolders. You can use this folder.", color = SecondaryText) }
+                item {
+                    IgnoredFoldersEditor(SourceConfig(sourceId, host, port.toIntOrNull(), share, rootPath, username, password),
+                        ignoredFolders, ignoredFiles, { ignoredFolders = it }, { ignoredFiles = it }, !busy && folderReady)
+                }
             }
         }
     }

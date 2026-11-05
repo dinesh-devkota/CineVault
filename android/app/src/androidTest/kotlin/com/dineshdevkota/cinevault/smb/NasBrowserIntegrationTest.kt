@@ -22,7 +22,7 @@ class NasBrowserIntegrationTest {
         val shares = browser.listShares(config).map { it.name }
         assertTrue("CINEVAULT" in shares)
         assertFalse("IPC$" in shares)
-        assertEquals(listOf("Movies"), browser.listFolders(config.copy(rootPath = "")))
+        assertEquals(listOf("MediaChecks", "Movies"), browser.listFolders(config.copy(rootPath = "")))
         assertTrue(browser.listFolders(config).containsAll(listOf("Feature (2020)", "Extras", "@eaDir")))
         assertEquals(emptyList<String>(), browser.listFolders(config.copy(rootPath = "Movies/Feature (2020)")))
     }
@@ -43,6 +43,24 @@ class NasBrowserIntegrationTest {
             assertTrue(files.any { it.path.endsWith("Too Small.mp4") })
             assertTrue(files.any { it.path.endsWith("Feature (2020).mp4") })
             assertFalse(files.any { it.path.contains("Extras/") || it.path.contains("@eaDir/") })
+        } finally { smb.reset(config.id) }
+    }
+
+    @Test fun typeScriptIsRejectedAndExclusionsApplyBeforeProgressIsReported() = runBlocking {
+        val config = fixture().copy(rootPath = "MediaChecks")
+        val smb = SmbService()
+        try {
+            val files = smb.scanMedia(config) { }
+            assertEquals(setOf("MediaChecks/clip.ts", "MediaChecks/Keep.mp4", "MediaChecks/Ignored/Hidden.mp4"),
+                files.map { it.path }.toSet())
+            val excluded = config.copy(ignoredFolders = listOf("Ignored"), ignoredFiles = listOf("Keep.mp4"))
+            val reported = mutableListOf<String>()
+            val filtered = smb.scanMedia(excluded) { progress -> reported += progress.files.map { it.path } }
+            assertEquals(listOf("MediaChecks/clip.ts"), filtered.map { it.path })
+            assertEquals(listOf("MediaChecks/clip.ts"), reported)
+            val entries = NasBrowser().listEntries(config)
+            assertTrue(entries.any { it.name == "Ignored" && it.isDirectory })
+            assertTrue(entries.any { it.name == "Keep.mp4" && !it.isDirectory })
         } finally { smb.reset(config.id) }
     }
 }

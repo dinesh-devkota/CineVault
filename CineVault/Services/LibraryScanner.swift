@@ -10,12 +10,15 @@ final class LibraryScanner: ObservableObject {
     private let scanVideos: (SourceConfig) async throws -> [RemoteFile]
     private let scanWithProgress: ((SourceConfig, MediaScanReporter) async throws -> [RemoteFile])?
     private let saveContext: (ModelContext) throws -> Void
+    private let fetchMetadata: (ModelContext) async throws -> MetadataFetchSummary?
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    init(scanVideos: ((SourceConfig) async throws -> [RemoteFile])? = nil,
+    init(fetchMetadata: ((ModelContext) async throws -> MetadataFetchSummary?)? = nil,
+         scanVideos: ((SourceConfig) async throws -> [RemoteFile])? = nil,
          scanWithProgress: ((SourceConfig, MediaScanReporter) async throws -> [RemoteFile])? = nil,
          saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
         self.saveContext = saveContext
+        self.fetchMetadata = fetchMetadata ?? { try await MetadataService.shared.fetchMissing(in: $0) }
         self.scanVideos = scanVideos ?? { try await SMBService.shared.scanVideos($0) }
         if let scanWithProgress { self.scanWithProgress = scanWithProgress }
         else if scanVideos == nil {
@@ -43,15 +46,16 @@ final class LibraryScanner: ObservableObject {
         do {
             let config = try source.config()
             let state = LibraryScanState(source: source, context: context, config: config, saveContext: saveContext)
-            let files: [RemoteFile]
+            let scannedFiles: [RemoteFile]
             if let scanWithProgress {
-                files = try await scanWithProgress(config) { progress in
+                scannedFiles = try await scanWithProgress(config) { progress in
                     try state.apply(progress.files)
-                    self.status = "Scanning \(source.name): \(progress.found) items in \(progress.folders) folders…"
+                    self.status = "Scanning \(source.name): \(state.foundCount) items in \(progress.folders) folders…"
                 }
-            } else { files = try await scanVideos(config) }
+            } else { scannedFiles = try await scanVideos(config) }
             try Task.checkCancellation()
             try state.verifySource()
+            let files = scannedFiles.filter { !config.excludesFile($0.path) && MediaFile.shouldIndex(path: $0.path, size: $0.size) }
             var existing = Dictionary(source.movies.map { ($0.filePath, $0) }, uniquingKeysWith: { a, _ in a })
             let previous = existing.values.map { ($0, $0.isMissing, $0.fileSize) }
             let previousScanDate = source.lastScanDate
@@ -79,7 +83,7 @@ final class LibraryScanner: ObservableObject {
             }
             status = scanSummary()
             do {
-                let result = try await MetadataService.shared.fetchMissing(in: context)
+                let result = try await fetchMetadata(context)
                 let complete = scanSummary()
                 status = complete
                 if let failure = result?.failureMessage {
@@ -112,6 +116,8 @@ private final class LibraryScanState {
     let context: ModelContext
     let config: SourceConfig
     private(set) var added = 0
+    private var foundPaths: Set<String> = []
+    var foundCount: Int { foundPaths.count }
     private var indexed: [String: Movie]
     private let saveContext: (ModelContext) throws -> Void
     init(source: MediaSource, context: ModelContext, config: SourceConfig,
@@ -127,6 +133,7 @@ private final class LibraryScanState {
     }
     func apply(_ files: [RemoteFile]) throws {
         try verifySource()
+        let files = files.filter { !config.excludesFile($0.path) && MediaFile.shouldIndex(path: $0.path, size: $0.size) }
         guard !files.isEmpty else { return }
         var previous: [(Movie, Bool, Int64)] = []
         var inserted: [Movie] = []
@@ -143,6 +150,7 @@ private final class LibraryScanState {
             added -= inserted.count
             throw error
         }
+        foundPaths.formUnion(files.map(\.path))
     }
     @discardableResult
     func insert(_ file: RemoteFile) -> Movie {

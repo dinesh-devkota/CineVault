@@ -46,6 +46,7 @@ import com.dineshdevkota.cinevault.container
 import com.dineshdevkota.cinevault.core.Tmdb
 import com.dineshdevkota.cinevault.data.MovieEntity
 import com.dineshdevkota.cinevault.playback.PlayerActivity
+import com.dineshdevkota.cinevault.playback.PlaybackValidator
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import java.util.Locale
@@ -79,11 +80,12 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
         database.movies().observe(movieId).collect { if (it == null) onClose() else value = it }
     }
     val current = movie ?: return
+    val playbackRejection = PlaybackValidator.rejectionReason(current)
     val sourceName by produceState<String?>(null, current.sourceId) {
         value = database.sources().get(current.sourceId)?.name
     }
     val actions = remember { FocusRequester() }
-    LaunchedEffect(Unit) { actions.requestFocus() }
+    LaunchedEffect(playbackRejection) { actions.requestFocus() }
 
     Box(Modifier.fillMaxSize()) {
         Artwork(Tmdb.imageUrl(current.backdropPath, "w1280"), "", Modifier.fillMaxSize())
@@ -110,7 +112,8 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                 Modifier.weight(1f).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                OutlinedButton(onClick = onClose) { Text("Back") }
+                OutlinedButton(onClick = onClose,
+                    modifier = if (playbackRejection != null) Modifier.focusRequester(actions) else Modifier) { Text("Back") }
                 Text(
                     "CINE-MEDIA  /  ${current.mediaKind.label.uppercase(Locale.ROOT)}",
                     style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 3.sp),
@@ -141,13 +144,13 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                         modifier = Modifier.widthIn(max = 820.dp),
                     )
                 }
-                if (current.isMissing) {
+                if (playbackRejection != null) {
                     Text(
-                        "This file wasn't found in the last scan. Reconnect the NAS and rescan its source.",
+                        playbackRejection,
                         color = ErrorText,
                     )
                 }
-                Row(
+                if (playbackRejection == null) Row(
                     Modifier.padding(top = 12.dp).focusRequester(actions),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
@@ -164,6 +167,8 @@ private fun MovieDetailScreen(movieId: String, onClose: () -> Unit) {
                         }
                     }
                 }
+                Text("Supported containers still depend on the audio and video codecs this TV can decode.",
+                    style = MaterialTheme.typography.bodySmall, color = SecondaryText)
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     OutlinedButton(
                         enabled = !updatingWatchlist,

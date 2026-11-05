@@ -77,10 +77,16 @@ MP4 is a useful starting point.
 6. Test a title edit, a TMDB match using your own TMDB API key, and a progress
    reset. Rescan and inspect the resulting library state.
 
-Playback depends on the device's codecs. Supported file extensions are MP4,
-M4V, MOV, MKV, WebM, AVI, TS, M2TS, MPG, MPEG, and FLV. WMV and ISO files can
-appear in the library but cannot be played. A supported extension does not
-guarantee support for its audio and video codecs.
+Playback candidates are MP4, M4V, MOV, MKV, WebM, AVI, TS, MPG, MPEG, and FLV;
+audio candidates are MP3, M4A, AAC, FLAC, WAV, Ogg, and Opus. The device must
+also support the contained codecs. WMV, ISO, M2TS, WMA, and AIFF/AIF can appear
+in the library but do not offer Play controls in this Android build.
+
+The pinned Media3 1.8.0 TS extractor requires standard 188-byte packets.
+Scanning recognizes transport streams, rejects TypeScript source and `.d.ts`
+declarations, and skips `node_modules`. Playback checks legacy `.ts` entries
+again before opening the player. See the audited format references and
+platform comparison in [the media guide](MEDIA-GUIDE.md#check-the-scan-and-playback).
 
 Report failures with the device model, Android version, app commit, NAS type,
 container/codecs, exact action, and displayed error. Remove credentials and

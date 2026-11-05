@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dineshdevkota.cinevault.data.CineVaultDatabase
 import com.dineshdevkota.cinevault.data.MovieEntity
 import com.dineshdevkota.cinevault.data.SourceEntity
+import com.dineshdevkota.cinevault.data.saveSourceWithExclusions
 import com.dineshdevkota.cinevault.library.LibraryEditor
 import com.dineshdevkota.cinevault.playback.PlaybackProgressWriter
 import kotlinx.coroutines.CompletableDeferred
@@ -56,19 +57,19 @@ class MetadataMutationTest {
     }
 
     /** Holds the automatic reply while a manual operation is queued. No network is used. */
-    private class Replies {
+    private class Replies(private val responseBody: String? = null) {
         val started = CompletableDeferred<Unit>()
         val release = CountDownLatch(1)
         val requests = CopyOnWriteArrayList<Int>()
         val client = OkHttpClient.Builder().addInterceptor { chain ->
-            val id = chain.request().url.pathSegments.last().toInt()
+            val id = chain.request().url.pathSegments.last().toIntOrNull() ?: 0
             requests += id
             if (requests.size == 1) {
                 started.complete(Unit)
                 check(release.await(10, TimeUnit.SECONDS)) { "Timed out releasing metadata response" }
             }
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
-                .body("""{"id":$id,"title":"Match $id","overview":"Details $id"}""".toResponseBody("application/json".toMediaType()))
+                .body((responseBody ?: """{"id":$id,"title":"Match $id","overview":"Details $id"}""").toResponseBody("application/json".toMediaType()))
                 .build()
         }.build()
     }
@@ -144,6 +145,43 @@ class MetadataMutationTest {
             } finally {
                 replies.release.countDown()
             }
+        }
+    }
+
+    @Test
+    fun ignoredMovieRejectsAnInFlightDetailsResponseIncludingForcedTitleChanges() = runBlocking {
+        withTimeout(15_000) {
+            val movie = movie()
+            val replies = Replies()
+            val service = MetadataService(database, TmdbClient(replies.client) { "fixture-only" })
+            val request = async(Dispatchers.IO) { service.apply(2, movie.id, force = true) }
+            try {
+                replies.started.await()
+                val source = database.sources().get(movie.sourceId)!!
+                database.saveSourceWithExclusions(source.copy(ignoredFiles = listOf(movie.filePath)))
+                replies.release.countDown()
+                request.await()
+                assertEquals(movie.copy(isMissing = true), database.movies().get(movie.id))
+            } finally { replies.release.countDown() }
+        }
+    }
+
+    @Test
+    fun ignoredMovieIsNotMarkedFetchedByAnInFlightEmptySearch() = runBlocking {
+        withTimeout(15_000) {
+            val movie = movie().copy(tmdbId = null, parsedYear = null, year = null)
+            database.movies().update(movie)
+            val replies = Replies("""{"results":[]}""")
+            val service = MetadataService(database, TmdbClient(replies.client) { "fixture-only" })
+            val request = async(Dispatchers.IO) { service.match(movie) }
+            try {
+                replies.started.await()
+                val source = database.sources().get(movie.sourceId)!!
+                database.saveSourceWithExclusions(source.copy(ignoredFiles = listOf(movie.filePath)))
+                replies.release.countDown()
+                request.await()
+                assertEquals(movie.copy(isMissing = true), database.movies().get(movie.id))
+            } finally { replies.release.countDown() }
         }
     }
 }

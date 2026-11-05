@@ -21,7 +21,7 @@ final class NASDiscoveryTests: XCTestCase {
         }
         defer { subscription.cancel(); discovery.stop() }
         discovery.start()
-        await fulfillment(of: [found], timeout: 15)
+        await fulfillment(of: [found], timeout: 40)
         let device = try XCTUnwrap(resolved)
         XCTAssertFalse(device.host.isEmpty)
         XCTAssertEqual(device.port, 1445)
@@ -40,5 +40,27 @@ final class NASDiscoveryTests: XCTestCase {
         XCTAssertTrue(discovery.searching)
         XCTAssertTrue(discovery.devices.isEmpty)
         discovery.stop()
+    }
+
+    func testFirstScanFindsADeviceAdvertisedAfterTheOldTenSecondCutoff() async throws {
+        let name = "CineVault Late Test \(UUID().uuidString.prefix(8))"
+        let publisher = NetService(domain: "local.", type: "_smb._tcp.", name: name, port: 1445)
+        let discovery = NASDiscovery()
+        let found = expectation(description: "First scan receives late NAS announcement")
+        var didFind = false
+        let subscription = discovery.$devices.sink { devices in
+            if !didFind, devices.contains(where: { $0.name == name }) {
+                didFind = true
+                found.fulfill()
+            }
+        }
+        discovery.start()
+        let delayedPublish = Task {
+            do { try await Task.sleep(for: .seconds(12)) } catch { return }
+            publisher.publish()
+        }
+        defer { delayedPublish.cancel(); publisher.stop(); subscription.cancel(); discovery.stop() }
+        await fulfillment(of: [found], timeout: 40)
+        XCTAssertTrue(discovery.devices.contains { $0.name == name && $0.port == 1445 })
     }
 }

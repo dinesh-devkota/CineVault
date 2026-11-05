@@ -11,6 +11,10 @@ final class MediaSource {
     var share: String = ""
     /// Folder inside the share to scan, e.g. "Movies". Empty scans the whole share.
     var rootPath: String = ""
+    /// Folder paths relative to rootPath. Nil preserves the behavior of older libraries.
+    var ignoredFolders: [String]?
+    /// Exact file paths relative to rootPath; unlike folders these do not match descendants.
+    var ignoredFiles: [String]?
     var username: String = ""
     var lastScanDate: Date?
     @Relationship(deleteRule: .cascade, inverse: \Movie.source)
@@ -39,7 +43,38 @@ final class MediaSource {
         var secret = ""
         if !username.isEmpty { secret = try password() }
         return SourceConfig(id: id, host: host, port: port, share: share, rootPath: rootPath,
-                            username: username, password: secret)
+                            username: username, password: secret, ignoredFolders: ignoredFolders ?? [], ignoredFiles: ignoredFiles ?? [])
+    }
+
+    func isIgnored(filePath: String) -> Bool {
+        ScanExclusions.isFileExcluded(path: filePath, rootPath: rootPath,
+                                      ignoredFolders: ignoredFolders ?? [], ignoredFiles: ignoredFiles ?? [])
+    }
+
+    /// Keep records and playback history; a later scan restores files that are no longer ignored.
+    func applyIgnoredPaths(folders: [String], files: [String]) throws {
+        func normalize(_ paths: [String], folder: Bool) throws -> [String] {
+            var normalized: [String] = []
+            var seen: Set<String> = []
+            for path in paths {
+                guard let value = folder ? ScanExclusions.normalizeFolder(path: path) : ScanExclusions.normalizeFile(path: path)
+                    else { throw IgnoredFolderError.invalidPath }
+                if seen.insert(value.lowercased()).inserted { normalized.append(value) }
+            }
+            return normalized
+        }
+        let normalizedFolders = try normalize(folders, folder: true)
+        let normalizedFiles = try normalize(files, folder: false)
+        ignoredFolders = normalizedFolders.isEmpty ? nil : normalizedFolders
+        ignoredFiles = normalizedFiles.isEmpty ? nil : normalizedFiles
+        for movie in movies where isIgnored(filePath: movie.filePath) { movie.isMissing = true }
+    }
+}
+
+enum IgnoredFolderError: LocalizedError {
+    case invalidPath
+    var errorDescription: String? {
+        "Enter a path relative to this source, such as Movies/Extras. Do not use parent paths or network addresses."
     }
 }
 
@@ -52,6 +87,23 @@ struct SourceConfig: Sendable, Hashable {
     let rootPath: String
     let username: String
     let password: String
+    let ignoredFolders: [String]
+    let ignoredFiles: [String]
+
+    init(id: UUID, host: String, port: Int? = nil, share: String, rootPath: String,
+         username: String, password: String, ignoredFolders: [String] = [], ignoredFiles: [String] = []) {
+        self.id = id; self.host = host; self.port = port; self.share = share; self.rootPath = rootPath
+        self.username = username; self.password = password; self.ignoredFolders = ignoredFolders
+        self.ignoredFiles = ignoredFiles
+    }
+
+    func excludesDirectory(_ path: String) -> Bool {
+        ScanExclusions.isDirectoryExcluded(path: path, rootPath: rootPath, ignoredFolders: ignoredFolders)
+    }
+
+    func excludesFile(_ path: String) -> Bool {
+        ScanExclusions.isFileExcluded(path: path, rootPath: rootPath, ignoredFolders: ignoredFolders, ignoredFiles: ignoredFiles)
+    }
 
     var serverURL: URL? {
         URL(string: "smb://\(host)" + (port.map { ":\($0)" } ?? ""))

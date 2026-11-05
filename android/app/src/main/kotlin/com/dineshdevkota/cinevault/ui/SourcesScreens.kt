@@ -45,7 +45,7 @@ fun SourcesTab(movies: List<MovieEntity>) {
     val sources by remember { container.database.sources().observeAll() }.collectAsStateWithLifecycle(emptyList())
     val scanning by container.scanner.isScanning.collectAsStateWithLifecycle()
     val status by container.scanner.status.collectAsStateWithLifecycle()
-    val counts = remember(movies) { movies.groupingBy { it.sourceId }.eachCount() }
+    val counts = remember(movies) { movies.filter { !it.isMissing }.groupingBy { it.sourceId }.eachCount() }
 
     LazyColumn(
         contentPadding = PaddingValues(start = ScreenPadding, end = ScreenPadding, bottom = 48.dp),

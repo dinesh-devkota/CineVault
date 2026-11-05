@@ -3,17 +3,18 @@ package com.dineshdevkota.cinevault.core
 /** Decides which files on a share are movies and whether ExoPlayer can open them. */
 object VideoFile {
     /** Containers ExoPlayer extracts natively (MP4/MOV, Matroska/WebM, AVI, MPEG-TS/PS, FLV). */
-    val playableExtensions = setOf("mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "mpg", "mpeg", "flv")
+    val playableExtensions = setOf("mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "mpg", "mpeg", "flv")
 
     /** Indexed so the library is complete, but not playable on Android TV. */
-    val otherExtensions = setOf("wmv", "iso")
+    val otherExtensions = setOf("wmv", "iso", "m2ts")
 
     fun isVideo(path: String): Boolean {
         val ext = Paths.extension(path)
         return ext in playableExtensions || ext in otherExtensions
     }
 
-    fun isPlayable(path: String): Boolean = Paths.extension(path) in playableExtensions
+    fun isPlayable(path: String): Boolean = MediaFile.isPlaybackPathAllowed(path) &&
+        Paths.extension(path.replace('\\', '/')) in playableExtensions
 
     /** Skips samples, trailers, extras and NAS metadata folders/files. */
     fun shouldIndex(path: String, size: Long, minimumSize: Long = 50L * 1024 * 1024): Boolean {

@@ -378,3 +378,44 @@ The owner explicitly authorized merging development into the default branch
 after these checks. `main` is an ancestor of this revision, so a fast-forward
 preserves all existing main history. This final handoff update changes only
 documentation; its application source is identical to the validated revision.
+
+### NAS exclusions, first-search timing, and media validation — 2026-11-04
+
+- Android and Apple TV source editors now browse the scan root and let the user
+  ignore whole folders (including descendants) or individual files. Rules are
+  relative to the selected root. Saving hides matching entries immediately,
+  preserves watch history, and scans again; including them restores them after
+  a successful scan. Connection/share/root changes clear relative rules with a
+  notice. Android Room v4 migrates existing source rows without data deletion;
+  SwiftData fields are additive and optional. Late scans/metadata cannot revive
+  ignored entries.
+- NAS discovery now starts its 15-second browsing window after the system's
+  discovery-start callback, allows bounded resolution grace, and retries failed
+  resolution once. Results publish as they resolve; another scan cannot cancel
+  an active search. A delayed synthetic advertisement test exercises first-scan
+  discovery after the old 10-second cutoff. Physical emulator/LAN multicast
+  forwarding is still network-dependent; do not claim every real NAS was tested.
+- Scanning rejects `.d.ts` and `node_modules`, and reads at most 1024 bytes for
+  ambiguous `.ts` candidates to distinguish transport streams from TypeScript.
+  Existing bad entries disappear after a successful rescan; no NAS files are
+  deleted. Real 188/192/204-byte transport streams remain recognizable for the
+  catalog, but Android playback accepts only its extractor's 188-byte layout.
+- Audited official Android Media3 documentation and the pinned 1.8.0 extractors.
+  M2TS, WMA, and AIFF/AIF are not playable in this Android build. Both platforms
+  gate Play controls by their actual container candidates and reject code paths;
+  Android rechecks legacy `.ts` content before playback. Apple TV asynchronously
+  loads asset playability, protects history on failure/cancellation, and surfaces
+  native-player failures. Actual codec support still depends on the device.
+  See `docs/MEDIA-GUIDE.md` for the audited table and primary-source links.
+- Local Android build passed 118 JVM tests, debug lint (0 errors, 3 existing
+  warnings), and debug/test APK assembly. Both APKs were installed with `-r` on
+  the owner's emulator without clearing app data after the owner confirmed the
+  metadata fetch had finished. All 18 isolated scanner, migration, metadata, and
+  late-discovery runtime tests passed. Never run the full instrumentation suite
+  on this emulator: other navigation tests clear the actual library.
+- Five Python build-helper tests passed using Git Bash on Windows. The system
+  `bash.exe` points to unavailable WSL and fails these helpers with exit 127;
+  prefix the test process PATH with Git's `bin` when running them locally.
+- This update is being pushed to the development branch. Hosted macOS/Android
+  results must be checked separately; Windows cannot validate tvOS builds.
+  No signing, TestFlight, store upload, or new physical Apple TV test occurred.
